@@ -47,8 +47,9 @@ def create_app() -> Flask:
     except Exception as e:
         logger.error(f"Database initialization warning on startup: {e}")
 
-    # Register API Endpoints
+    # Register API Endpoints (both /api/v1 and /v1 for serverless/reverse proxy compatibility)
     app.register_blueprint(api_bp)
+    app.register_blueprint(api_bp, name="api_v1_direct", url_prefix="/v1")
 
     # Cross-Origin Resource Sharing (CORS) Configuration
     @app.after_request
@@ -60,6 +61,10 @@ def create_app() -> Flask:
 
     @app.route("/api/v1/<path:dummy>", methods=["OPTIONS"])
     def handle_options_preflight(dummy):
+        return "", 204
+
+    @app.route("/v1/<path:dummy>", methods=["OPTIONS"])
+    def handle_options_preflight_v1(dummy):
         return "", 204
 
     # Web Dashboard Routes

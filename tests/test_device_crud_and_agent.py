@@ -142,6 +142,65 @@ class TestDeviceCrudAndAgentApi(unittest.TestCase):
         self.assertIn("Access-Control-Allow-Origin", options_res.headers)
         self.assertIn("Access-Control-Allow-Methods", options_res.headers)
 
+    def test_serverless_wsgi_path_normalization(self):
+        """Regression Test: Verifies Vercel serverless WSGI adapter normalizes stripped or rewritten paths."""
+        from api.index import VercelWSGIAdapter
+        from werkzeug.test import EnvironBuilder
+        from werkzeug.wrappers import Response
+
+        adapter = VercelWSGIAdapter(self.app)
+
+        # 1. Direct /v1/health (stripped prefix)
+        builder1 = EnvironBuilder(path="/v1/health", method="GET")
+        res1 = Response.from_app(adapter, builder1.get_environ())
+        self.assertEqual(res1.status_code, 200)
+        self.assertEqual(res1.get_json()["status"], "HEALTHY")
+
+        # 2. Rewritten /api/index with RAW_URI = /api/v1/health
+        builder2 = EnvironBuilder(path="/api/index", method="GET")
+        env2 = builder2.get_environ()
+        env2["RAW_URI"] = "/api/v1/health"
+        res2 = Response.from_app(adapter, env2)
+        self.assertEqual(res2.status_code, 200)
+        self.assertEqual(res2.get_json()["status"], "HEALTHY")
+
+        # 3. Direct /api/v1/devices
+        builder3 = EnvironBuilder(path="/api/v1/devices", method="GET")
+        res3 = Response.from_app(adapter, builder3.get_environ())
+        self.assertEqual(res3.status_code, 200)
+
+    def test_postgres_failure_never_reports_ready(self):
+        """Verification Checklist #5: PostgreSQL connection failure must NOT falsely report readiness."""
+        import os
+        from backend.database import check_database_readiness
+        import backend.config as cfg
+        import backend.database as db
+
+        old_url = os.environ.get("DATABASE_URL")
+        # Point to unreachable PostgreSQL instance
+        os.environ["DATABASE_URL"] = "postgresql://invalid_user:invalid_pass@127.0.0.1:59999/invalid_db"
+        cfg.DATABASE_URL = os.environ["DATABASE_URL"]
+        db.DATABASE_URL = os.environ["DATABASE_URL"]
+
+        try:
+            status = check_database_readiness()
+            self.assertFalse(status["ready"], "Unreachable PostgreSQL must return ready=False")
+            self.assertIn("error", status)
+
+            # Test REST endpoint returns HTTP 503 NOT_READY
+            res = self.client.get("/api/v1/ready")
+            self.assertEqual(res.status_code, 503)
+            self.assertEqual(res.get_json()["status"], "NOT_READY")
+        finally:
+            if old_url is not None:
+                os.environ["DATABASE_URL"] = old_url
+                cfg.DATABASE_URL = old_url
+                db.DATABASE_URL = old_url
+            else:
+                os.environ.pop("DATABASE_URL", None)
+                cfg.DATABASE_URL = None
+                db.DATABASE_URL = None
+
 
 if __name__ == "__main__":
     unittest.main()
