@@ -18,15 +18,30 @@ Retourne l'état opérationnel du serveur et les statistiques globales du parc.
   "status": "HEALTHY",
   "version": "2.4.0",
   "enterprise": "UniversiaCorp Global",
-  "soc_center": "UniversiaCorp Global Cyber Defense Operations Center (CDOC)",
+  "soc": "Cyber Defense Operations Center (CDOC)",
   "timestamp": "2026-10-16T11:42:00+00:00",
   "stats": {
-    "total_devices": 11,
-    "online_devices": 11,
-    "degraded_devices": 0,
-    "critical_devices": 0,
-    "active_threats": 0
+    "total_devices": 14,
+    "online": 14,
+    "degraded": 0,
+    "critical": 0,
+    "unresolved_alerts": 0
   }
+}
+```
+
+---
+
+### `GET /api/v1/ready`
+Sonde de préparation vérifiant la connectivité à la base de données relationnelle persistante (PostgreSQL ou SQLite WAL) et le catalogue actif.
+- **Réponse 200 OK :**
+```json
+{
+  "status": "READY",
+  "database_engine": "PostgreSQL",
+  "devices_registered": 14,
+  "active_alerts": 0,
+  "timestamp": "2026-10-16T11:42:00+00:00"
 }
 ```
 
@@ -74,8 +89,60 @@ Liste l'ensemble des équipements enregistrés avec filtrage optionnel.
 - **Réponse 200 OK :**
 ```json
 {
-  "count": 11,
+  "count": 14,
   "devices": [...]
+}
+```
+
+---
+
+### `POST /api/v1/devices`
+Crée et enregistre un nouvel équipement dans l'inventaire avec validation des champs, détection de conflit d'IP et enregistrement dans la piste d'audit.
+- **Corps de la requête :**
+```json
+{
+  "id": "srv-backup-01",
+  "hostname": "backup-storage.corp.internal",
+  "ip_address": "10.0.5.50",
+  "mac_address": "00:1A:2B:3C:4D:5E",
+  "tier": "SERVICES",
+  "role": "Backup Storage Server",
+  "vendor": "Ubuntu Linux 24.04 LTS",
+  "services": [
+    { "port": 22, "name": "SSH" },
+    { "port": 443, "name": "HTTPS" }
+  ]
+}
+```
+- **Réponse 201 Created :**
+```json
+{
+  "status": "CREATED",
+  "device": { ... }
+}
+```
+
+---
+
+### `PUT /api/v1/devices/<device_id>`
+Met à jour les métadonnées d'un équipement (nom d'hôte, adresse IP, niveau réseau, rôle, services exposés).
+- **Réponse 200 OK :**
+```json
+{
+  "status": "UPDATED",
+  "device": { ... }
+}
+```
+
+---
+
+### `DELETE /api/v1/devices/<device_id>`
+Supprime un équipement du catalogue avec suppression en cascade de ses liaisons topologiques, métriques télémétriques et alertes associées.
+- **Réponse 200 OK :**
+```json
+{
+  "status": "DELETED",
+  "message": "Device 'srv-backup-01' deleted successfully."
 }
 ```
 
@@ -188,6 +255,42 @@ Fournit l'instantané agrégé du cluster et les derniers échantillons horodat�
       "collector_method": "SYNTHETIC_ENTERPRISE_TELEMETRY"
     }
   ]
+}
+```
+
+---
+
+### `POST /api/v1/telemetry/report`
+Point d'ingestion par lots pour l'agent collecteur autonome (`agent/collector_agent.py`) déployé sur le réseau local. Reçoit les sondes réelles (ICMP et TCP) et met à jour l'état des machines et l'historique télémétrique.
+- **Corps de la requête :**
+```json
+{
+  "agent_id": "agent-worker-lan01",
+  "timestamp": "2026-10-16T12:00:00+00:00",
+  "agent_host_metrics": {
+    "cpu_percent": 14.5,
+    "memory_percent": 38.2
+  },
+  "probes": [
+    {
+      "device_id": "fw-edge-01",
+      "reachable": true,
+      "rtt_ms": 1.25,
+      "packet_loss_percent": 0.0,
+      "cpu_percent": 28.0,
+      "memory_percent": 42.0
+    }
+  ]
+}
+```
+- **Réponse 200 OK :**
+```json
+{
+  "status": "ACCEPTED",
+  "agent_id": "agent-worker-lan01",
+  "probes_processed": 1,
+  "devices_updated": 1,
+  "timestamp": "2026-10-16T12:00:00+00:00"
 }
 ```
 

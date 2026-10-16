@@ -581,3 +581,81 @@ body {
   font-size: 0.72rem;
   color: var(--text-muted);
 }
+
+/* SOC Form Controls & Toolbars */
+.soc-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 16px;
+  background: var(--bg-surface-elevated);
+  border-bottom: 1px solid var(--border-subtle);
+  flex-wrap: wrap;
+}
+
+.soc-toolbar-filters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.soc-input, .soc-select {
+  background: #0b1120;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 0.78rem;
+  padding: 5px 10px;
+  outline: none;
+  transition: border-color var(--transition-fast);
+}
+
+.soc-input:focus, .soc-select:focus {
+  border-color: var(--color-brand);
+  box-shadow: 0 0 8px var(--color-brand-glow);
+}
+
+.soc-input::placeholder {
+  color: var(--text-muted);
+}
+
+.soc-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.soc-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.soc-form-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+}
+
+.btn-success {
+  background: var(--color-success);
+  color: #ffffff;
+}
+
+.btn-success:hover {
+  background: #059669;
+}
+
+.badge-db {
+  font-size: 0.7rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  font-family: monospace;
+}
+

@@ -11,6 +11,8 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 DATA_DIR.mkdir(exist_ok=True)
+# Database & Persistence Settings
+DATABASE_URL = os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL") or os.getenv("NETSENTINEL_DATABASE_URL")
 DB_PATH = os.getenv("NETSENTINEL_DB_PATH", str(DATA_DIR / "netsentinel.db"))
 
 # Server Settings
@@ -18,6 +20,8 @@ HOST = os.getenv("NETSENTINEL_HOST", "0.0.0.0")
 PORT = int(os.getenv("NETSENTINEL_PORT", "8080"))
 DEBUG = os.getenv("NETSENTINEL_DEBUG", "false").lower() in ("true", "1", "yes")
 SECRET_KEY = os.getenv("NETSENTINEL_SECRET", "netsentinel-enterprise-soc-token-2026")
+API_KEY = os.getenv("NETSENTINEL_API_KEY", "")
+CORS_ORIGINS = os.getenv("NETSENTINEL_CORS_ORIGINS", "*")
 
 # Telemetry & Polling Settings
 POLL_INTERVAL_SECONDS = int(os.getenv("NETSENTINEL_POLL_INTERVAL", "5"))

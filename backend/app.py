@@ -15,7 +15,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
-from backend.config import HOST, PORT, DEBUG, ENTERPRISE_NAME, SOC_NAME, VERSION
+from backend.config import HOST, PORT, DEBUG, ENTERPRISE_NAME, SOC_NAME, VERSION, CORS_ORIGINS
 from backend.database import init_db, DeviceRepository
 from backend.engine.simulator import seed_enterprise_topology
 from backend.routes.api import api_bp
@@ -46,6 +46,18 @@ def create_app() -> Flask:
 
     # Register API Endpoints
     app.register_blueprint(api_bp)
+
+    # Cross-Origin Resource Sharing (CORS) Configuration
+    @app.after_request
+    def apply_cors_headers(response):
+        response.headers["Access-Control-Allow-Origin"] = CORS_ORIGINS
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-API-Key, X-SOC-Operator"
+        return response
+
+    @app.route("/api/v1/<path:dummy>", methods=["OPTIONS"])
+    def handle_options_preflight(dummy):
+        return "", 204
 
     # Web Dashboard Routes
     @app.route("/")

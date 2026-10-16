@@ -1,15 +1,17 @@
 """
 NetSentinel Enterprise - REST API Controller (/api/v1/...)
-Full enterprise endpoint catalog for Device Inventory, Telemetry Streams, Alerts, and SOC Operations.
+Full enterprise endpoint catalog for Device Inventory CRUD, Telemetry Streams, Alerts, and SOC Operations.
+Author: Mohammed Aichour
 """
 
 from flask import Blueprint, jsonify, request
 from typing import Dict, Any
 from datetime import datetime, timezone
 
-from backend.config import VERSION, ENTERPRISE_NAME, SOC_NAME
+from backend.config import VERSION, ENTERPRISE_NAME, SOC_NAME, API_KEY
 from backend.database import (
     get_connection,
+    check_database_readiness,
     DeviceRepository,
     AlertRepository,
     TelemetryRepository,
@@ -27,6 +29,28 @@ api_bp = Blueprint("api", __name__, url_prefix="/api/v1")
 correlator = EventCorrelator()
 alert_manager = AlertManager()
 attack_simulator = CyberAttackSimulator(correlator, alert_manager)
+
+
+@api_bp.before_request
+def authenticate_request():
+    """Optional API Key authentication middleware for mutating requests."""
+    if not API_KEY:
+        return None
+
+    # Allow read-only monitoring and health/readiness probes without API key
+    if request.method in ("GET", "OPTIONS") or request.path.endswith("/health") or request.path.endswith("/ready"):
+        return None
+
+    client_key = request.headers.get("X-API-Key")
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        client_key = auth_header[7:].strip()
+
+    if client_key != API_KEY:
+        return jsonify({
+            "error": "Unauthorized. Provide valid X-API-Key or Bearer token.",
+            "status": "UNAUTHORIZED"
+        }), 401
 
 
 @api_bp.route("/health", methods=["GET"])
@@ -53,6 +77,26 @@ def get_health():
             "unresolved_alerts": len(active_alerts)
         }
     })
+
+
+@api_bp.route("/ready", methods=["GET"])
+def get_readiness():
+    """Readiness probe validating database persistence connectivity and catalog status."""
+    db_status = check_database_readiness()
+    if db_status["ready"]:
+        return jsonify({
+            "status": "READY",
+            "database_engine": db_status["engine"],
+            "devices_registered": db_status.get("device_count", 0),
+            "active_alerts": db_status.get("active_alerts", 0),
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }), 200
+    else:
+        return jsonify({
+            "status": "NOT_READY",
+            "error": db_status.get("error", "Database connection failed"),
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }), 503
 
 
 @api_bp.route("/topology", methods=["GET"])
@@ -118,6 +162,23 @@ def list_devices():
     return jsonify({"count": len(devices), "devices": devices})
 
 
+@api_bp.route("/devices", methods=["POST"])
+def create_device():
+    """Creates a new device in the inventory."""
+    payload = request.get_json(silent=True)
+    if not payload or not isinstance(payload, dict):
+        return jsonify({"error": "Valid JSON object body is required."}), 400
+
+    operator = request.headers.get("X-SOC-Operator", payload.get("operator", "SOC-Operator"))
+    try:
+        created = DeviceRepository.create(payload, operator=operator)
+        return jsonify({"status": "CREATED", "device": created}), 201
+    except ValueError as e:
+        err_msg = str(e)
+        status_code = 409 if "already exists" in err_msg or "in use" in err_msg else 400
+        return jsonify({"error": err_msg}), status_code
+
+
 @api_bp.route("/devices/<device_id>", methods=["GET"])
 def get_device(device_id: str):
     """Retrieves specific device metadata and recent telemetry."""
@@ -130,6 +191,35 @@ def get_device(device_id: str):
         "device": device,
         "telemetry_history": history
     })
+
+
+@api_bp.route("/devices/<device_id>", methods=["PUT"])
+def update_device(device_id: str):
+    """Updates an existing device's metadata."""
+    payload = request.get_json(silent=True)
+    if not payload or not isinstance(payload, dict):
+        return jsonify({"error": "Valid JSON object body is required."}), 400
+
+    operator = request.headers.get("X-SOC-Operator", payload.get("operator", "SOC-Operator"))
+    try:
+        updated = DeviceRepository.update(device_id, payload, operator=operator)
+        if not updated:
+            return jsonify({"error": f"Device '{device_id}' not found"}), 404
+        return jsonify({"status": "UPDATED", "device": updated}), 200
+    except ValueError as e:
+        err_msg = str(e)
+        status_code = 409 if "in use" in err_msg or "already exists" in err_msg else 400
+        return jsonify({"error": err_msg}), status_code
+
+
+@api_bp.route("/devices/<device_id>", methods=["DELETE"])
+def delete_device(device_id: str):
+    """Deletes a device from inventory and cascades deletions across links and telemetry."""
+    operator = request.headers.get("X-SOC-Operator", "SOC-Operator")
+    success = DeviceRepository.delete(device_id, operator=operator)
+    if not success:
+        return jsonify({"error": f"Device '{device_id}' not found"}), 404
+    return jsonify({"status": "DELETED", "message": f"Device '{device_id}' deleted successfully."}), 200
 
 
 @api_bp.route("/devices/<device_id>/probe", methods=["POST"])
@@ -183,12 +273,11 @@ def probe_device(device_id: str):
     })
 
 
-
 @api_bp.route("/devices/<device_id>/quarantine", methods=["POST"])
 def toggle_quarantine(device_id: str):
     """
     Enforces or releases network quarantine / port isolation on a host.
-    Note: Operates at the software NMS routing level and logs to compliance audit trail.
+    Operates at the software NMS routing level and logs to compliance audit trail.
     """
     device = DeviceRepository.get_by_id(device_id)
     if not device:
@@ -249,6 +338,19 @@ def get_live_telemetry():
         },
         "samples": samples
     })
+
+
+@api_bp.route("/telemetry/report", methods=["POST"])
+def ingest_telemetry_report():
+    """Ingests batch telemetry collected by a standalone local collector agent."""
+    payload = request.get_json(silent=True)
+    if not payload or not isinstance(payload, dict):
+        return jsonify({"error": "Valid JSON report body is required."}), 400
+    if "probes" not in payload or not isinstance(payload["probes"], list):
+        return jsonify({"error": "Report must contain a 'probes' array."}), 400
+
+    result = TelemetryRepository.insert_agent_report(payload)
+    return jsonify(result), 200
 
 
 @api_bp.route("/alerts", methods=["GET"])
