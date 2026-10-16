@@ -286,6 +286,15 @@
               12.5% packet drop burst & 215ms latency spike on Cisco Nexus Core Backbone. Triggers NMS stability alert.
             </div>
           </button>
+
+          <button class="attack-btn-card danger" onclick="window.socApp.triggerAttackScenario('rogue_mac')">
+            <div class="attack-btn-title">
+              <span style="color: #ef4444;">🛡️</span> Rogue MAC Injection on Core VLAN
+            </div>
+            <div class="attack-btn-desc">
+              Unauthorized MAC 00:0C:29:DE:AD:01 attempts switchport uplink connection. Triggers Rule SEC-R004 (T1200).
+            </div>
+          </button>
         </div>
       </div>
     </div>
@@ -293,14 +302,14 @@
 
   <!-- Modal: Device Inspector -->
   <div class="modal-overlay" id="device-modal">
-    <div class="modal-box">
+    <div class="modal-box" style="max-width: 680px;">
       <div class="modal-header">
         <div style="font-weight: 700; font-size: 1rem; display: flex; align-items: center; gap: 8px;">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2">
             <rect x="2" y="2" width="20" height="8" rx="2" ry="2"/>
             <rect x="2" y="14" width="20" height="8" rx="2" ry="2"/>
           </svg>
-          Device Telemetry Inspector
+          Device Telemetry & Security Inspector
         </div>
         <button class="btn btn-secondary" id="btn-close-device-modal" style="padding: 4px 10px;">✕</button>
       </div>
@@ -314,11 +323,24 @@
           <div><strong style="color:#64748b;">Current Health:</strong> <div id="modal-dev-status" style="font-weight:700;">--</div></div>
         </div>
 
-        <div style="margin-top: 10px; display: flex; gap: 10px;">
-          <button class="btn btn-primary" onclick="alert('ICMP Probe Executed: Round-trip RTT: 1.2ms, Packet Loss: 0.0%, 3-way handshake verified.')">
-            Execute Live ICMP Probe
+        <div style="margin-top: 6px; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+          <span id="modal-telemetry-badge" style="font-size: 0.72rem; padding: 3px 8px; border-radius: 4px; background: rgba(56, 189, 248, 0.12); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.25);">
+            ⚡ Live ICMP / TCP Diagnostic Engine
+          </span>
+          <span style="font-size: 0.72rem; color: #94a3b8;" id="modal-dev-quarantine-status">Isolation: NONE</span>
+        </div>
+
+        <!-- Real-time Probe Results Box -->
+        <div id="modal-probe-results" style="display: none; background: #0b1120; border: 1px solid #1e293b; border-radius: 6px; padding: 12px; margin-top: 10px; font-size: 0.75rem;"></div>
+
+        <div style="margin-top: 12px; display: flex; gap: 10px;">
+          <button class="btn btn-primary" id="btn-execute-probe" onclick="window.socApp.probeSelectedDevice()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px; vertical-align: middle;">
+              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+            </svg>
+            Execute Live ICMP & TCP Probe
           </button>
-          <button class="btn btn-danger" onclick="window.socApp.quarantineDevice(window.socApp.selectedDevice.id); window.socApp.closeDeviceModal();">
+          <button class="btn btn-danger" id="btn-toggle-quarantine" onclick="window.socApp.toggleSelectedDeviceQuarantine()">
             Isolate / Quarantine Host
           </button>
         </div>

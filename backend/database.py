@@ -233,11 +233,51 @@ class DeviceRepository:
             conn.commit()
 
     @staticmethod
-    def set_quarantine(device_id: str, quarantined: bool, db_path: Optional[str] = None) -> None:
+    def recompute_status(device_id: str, db_path: Optional[str] = None) -> str:
+        """
+        Dynamically calculates device health based on remaining active alerts
+        and quarantine state. Ensures reliable device health recovery on alert resolution.
+        """
+        with get_connection(db_path) as conn:
+            dev = conn.execute("SELECT is_quarantined FROM devices WHERE id = ?", (device_id,)).fetchone()
+            if not dev:
+                return "OFFLINE"
+            if dev["is_quarantined"]:
+                conn.execute("UPDATE devices SET status = 'CRITICAL' WHERE id = ?", (device_id,))
+                conn.commit()
+                return "CRITICAL"
+
+            rows = conn.execute("""
+                SELECT severity FROM alerts
+                WHERE device_id = ? AND status IN ('NEW', 'ACKNOWLEDGED')
+            """, (device_id,)).fetchall()
+
+            severities = [r["severity"] for r in rows]
+            if "CRITICAL" in severities:
+                new_status = "CRITICAL"
+            elif "HIGH" in severities or "MEDIUM" in severities:
+                new_status = "DEGRADED"
+            else:
+                new_status = "ONLINE"
+
+            now_iso = datetime.now(timezone.utc).isoformat()
+            conn.execute("UPDATE devices SET status = ?, last_seen = ? WHERE id = ?", (new_status, now_iso, device_id))
+            conn.commit()
+            return new_status
+
+    @staticmethod
+    def set_quarantine(device_id: str, quarantined: bool, operator: str = "SOC-Analyst", reason: str = "Host software isolation", db_path: Optional[str] = None) -> None:
         val = 1 if quarantined else 0
         new_status = "CRITICAL" if quarantined else "ONLINE"
+        now_iso = datetime.now(timezone.utc).isoformat()
         with get_connection(db_path) as conn:
-            conn.execute("UPDATE devices SET is_quarantined = ?, status = ? WHERE id = ?", (val, new_status, device_id))
+            conn.execute("UPDATE devices SET is_quarantined = ?, status = ?, last_seen = ? WHERE id = ?", (val, new_status, now_iso, device_id))
+            # Record in compliance audit log
+            action = "QUARANTINE_ENFORCE" if quarantined else "QUARANTINE_RELEASE"
+            conn.execute("""
+                INSERT INTO audit_log (timestamp, operator, action, target_id, details)
+                VALUES (?, ?, ?, ?, ?)
+            """, (now_iso, operator, action, device_id, reason))
             conn.commit()
 
 
@@ -312,6 +352,12 @@ class AlertRepository:
             return cur.rowcount > 0
 
     @staticmethod
+    def get_by_id(alert_id: str, db_path: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        with get_connection(db_path) as conn:
+            row = conn.execute("SELECT * FROM alerts WHERE id = ?", (alert_id,)).fetchone()
+            return dict(row) if row else None
+
+    @staticmethod
     def resolve(alert_id: str, note: str = "Remediated by SOC operator", db_path: Optional[str] = None) -> bool:
         now_iso = datetime.now(timezone.utc).isoformat()
         with get_connection(db_path) as conn:
@@ -347,6 +393,27 @@ class TelemetryRepository:
             conn.commit()
 
     @staticmethod
+    def prune_old_samples(keep_per_device: int = 120, db_path: Optional[str] = None) -> int:
+        """Prunes historical samples beyond retention window to prevent database bloat."""
+        with get_connection(db_path) as conn:
+            dev_rows = conn.execute("SELECT DISTINCT device_id FROM telemetry_samples").fetchall()
+            deleted_count = 0
+            for r in dev_rows:
+                dev_id = r["device_id"]
+                cur = conn.execute("""
+                    DELETE FROM telemetry_samples
+                    WHERE device_id = ? AND id NOT IN (
+                        SELECT id FROM telemetry_samples
+                        WHERE device_id = ?
+                        ORDER BY id DESC
+                        LIMIT ?
+                    )
+                """, (dev_id, dev_id, keep_per_device))
+                deleted_count += cur.rowcount
+            conn.commit()
+            return deleted_count
+
+    @staticmethod
     def get_latest_samples(limit: int = 15, db_path: Optional[str] = None) -> List[Dict[str, Any]]:
         with get_connection(db_path) as conn:
             rows = conn.execute("""
@@ -371,3 +438,84 @@ class TelemetryRepository:
                 LIMIT ?
             """, (device_id, limit)).fetchall()
             return [dict(r) for r in reversed(rows)]
+
+
+class SecurityEventRepository:
+    @staticmethod
+    def insert(event: Dict[str, Any], db_path: Optional[str] = None) -> None:
+        now_iso = event.get("timestamp", datetime.now(timezone.utc).isoformat())
+        summary = event.get("payload_summary") or event.get("raw_message") or ""
+        with get_connection(db_path) as conn:
+            try:
+                conn.execute("""
+                    INSERT INTO security_events (timestamp, source_ip, target_device_id, event_type, payload_summary, severity)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (
+                    now_iso,
+                    event["source_ip"],
+                    event["target_device_id"],
+                    event["event_type"],
+                    summary,
+                    event.get("severity", "INFORMATIONAL")
+                ))
+                conn.commit()
+            except sqlite3.IntegrityError:
+                # SIEM Asset Auto-discovery: automatically register newly observed host
+                conn.execute("""
+                    INSERT OR IGNORE INTO devices (
+                        id, hostname, ip_address, mac_address, tier, role, vendor,
+                        status, services, is_quarantined, last_seen, created_at
+                    ) VALUES (?, ?, ?, ?, 'UNCLASSIFIED', 'Discovered Host', 'Generic Network Host', 'ONLINE', '[]', 0, ?, ?)
+                """, (
+                    event["target_device_id"],
+                    event["target_device_id"],
+                    event.get("source_ip", "0.0.0.0"),
+                    "00:00:00:00:00:00",
+                    now_iso,
+                    now_iso
+                ))
+                conn.execute("""
+                    INSERT INTO security_events (timestamp, source_ip, target_device_id, event_type, payload_summary, severity)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (
+                    now_iso,
+                    event["source_ip"],
+                    event["target_device_id"],
+                    event["event_type"],
+                    summary,
+                    event.get("severity", "INFORMATIONAL")
+                ))
+                conn.commit()
+
+
+    @staticmethod
+    def list_events(limit: int = 50, db_path: Optional[str] = None) -> List[Dict[str, Any]]:
+        with get_connection(db_path) as conn:
+            rows = conn.execute("""
+                SELECT * FROM security_events
+                ORDER BY id DESC
+                LIMIT ?
+            """, (limit,)).fetchall()
+            return [dict(r) for r in rows]
+
+
+class AuditLogRepository:
+    @staticmethod
+    def record(operator: str, action: str, target_id: str, details: str, db_path: Optional[str] = None) -> None:
+        now_iso = datetime.now(timezone.utc).isoformat()
+        with get_connection(db_path) as conn:
+            conn.execute("""
+                INSERT INTO audit_log (timestamp, operator, action, target_id, details)
+                VALUES (?, ?, ?, ?, ?)
+            """, (now_iso, operator, action, target_id, details))
+            conn.commit()
+
+    @staticmethod
+    def list_logs(limit: int = 50, db_path: Optional[str] = None) -> List[Dict[str, Any]]:
+        with get_connection(db_path) as conn:
+            rows = conn.execute("""
+                SELECT * FROM audit_log
+                ORDER BY id DESC
+                LIMIT ?
+            """, (limit,)).fetchall()
+            return [dict(r) for r in rows]

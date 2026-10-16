@@ -316,23 +316,56 @@ class SocApplication {
     }
   }
 
-  async quarantineDevice(deviceId) {
+  async quarantineDevice(deviceId, shouldQuarantine = true) {
     if (this.isLiveBackend) {
       await fetch(`/api/v1/devices/${deviceId}/quarantine`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ quarantine: true })
+        body: JSON.stringify({ quarantine: shouldQuarantine })
       });
       await this.refreshData();
     } else {
       const dev = this.devices.find(d => d.id === deviceId);
       if (dev) {
-        dev.is_quarantined = true;
-        dev.status = "CRITICAL";
+        dev.is_quarantined = shouldQuarantine;
+        dev.status = shouldQuarantine ? "CRITICAL" : "ONLINE";
       }
       this.topoViz.setData(this.devices, this.topology.links);
       this.renderDevicesTable();
       this.updateKpiCounters();
+    }
+  }
+
+  async toggleSelectedDeviceQuarantine() {
+    if (!this.selectedDevice) return;
+    const nextState = !this.selectedDevice.is_quarantined;
+    await this.quarantineDevice(this.selectedDevice.id, nextState);
+    this.selectedDevice.is_quarantined = nextState;
+    this.selectedDevice.status = nextState ? "CRITICAL" : "ONLINE";
+    this.updateDeviceModalState();
+  }
+
+  updateDeviceModalState() {
+    if (!this.selectedDevice) return;
+    const dev = this.selectedDevice;
+    const qStatus = document.getElementById("modal-dev-quarantine-status");
+    const qBtn = document.getElementById("btn-toggle-quarantine");
+    const statusEl = document.getElementById("modal-dev-status");
+
+    if (statusEl) {
+      statusEl.textContent = dev.is_quarantined ? "CRITICAL (QUARANTINED)" : dev.status;
+      statusEl.style.color = dev.is_quarantined ? "#ef4444" : (dev.status === "ONLINE" ? "#10b981" : "#f59e0b");
+    }
+
+    if (qStatus) {
+      qStatus.innerHTML = dev.is_quarantined
+        ? `<span style="color:#ef4444; font-weight:700;">● ISOLATED (Host Traffic Dropped)</span>`
+        : `<span style="color:#10b981;">● PERMITTED (Routing Active)</span>`;
+    }
+
+    if (qBtn) {
+      qBtn.textContent = dev.is_quarantined ? "Release Host Quarantine" : "Isolate / Quarantine Host";
+      qBtn.className = dev.is_quarantined ? "btn btn-secondary" : "btn btn-danger";
     }
   }
 
@@ -346,13 +379,164 @@ class SocApplication {
     document.getElementById("modal-dev-tier").textContent = dev.tier;
     document.getElementById("modal-dev-role").textContent = dev.role;
     document.getElementById("modal-dev-vendor").textContent = dev.vendor;
-    document.getElementById("modal-dev-status").textContent = dev.status;
 
+    const probeBox = document.getElementById("modal-probe-results");
+    if (probeBox) {
+      probeBox.style.display = "none";
+      probeBox.innerHTML = "";
+    }
+
+    const badge = document.getElementById("modal-telemetry-badge");
+    if (badge) {
+      badge.textContent = this.isLiveBackend
+        ? "⚡ Live Python Socket Probe (Real ICMP / TCP)"
+        : "🌐 Static GitHub Pages Mode (Simulated)";
+    }
+
+    this.updateDeviceModalState();
     document.getElementById("device-modal").classList.add("active");
   }
 
   closeDeviceModal() {
     document.getElementById("device-modal").classList.remove("active");
+  }
+
+  async probeSelectedDevice() {
+    if (!this.selectedDevice) return;
+    const probeBtn = document.getElementById("btn-execute-probe");
+    const probeBox = document.getElementById("modal-probe-results");
+    if (probeBtn) {
+      probeBtn.disabled = true;
+      probeBtn.innerHTML = `<span>Probing ${this.selectedDevice.hostname}...</span>`;
+    }
+
+    if (probeBox) {
+      probeBox.style.display = "block";
+      probeBox.innerHTML = `
+        <div style="display:flex; align-items:center; gap:8px; color: #38bdf8;">
+          <span class="pulse-dot"></span>
+          <span>Sending ICMP ping probe & testing configured TCP service ports...</span>
+        </div>
+      `;
+    }
+
+    try {
+      if (this.isLiveBackend) {
+        const res = await fetch(`/api/v1/devices/${this.selectedDevice.id}/probe`, { method: "POST" });
+        const data = await res.json();
+        this.renderProbeResults(data);
+        await this.refreshData();
+      } else {
+        // Fallback for static GitHub Pages
+        setTimeout(() => {
+          this.renderProbeResults({
+            device_id: this.selectedDevice.id,
+            hostname: this.selectedDevice.hostname,
+            ip_address: this.selectedDevice.ip || this.selectedDevice.ip_address,
+            icmp: {
+              reachable: true,
+              status: "REACHABLE",
+              rtt_ms: parseFloat((1.1 + Math.random() * 0.9).toFixed(2)),
+              packet_loss_percent: 0.0,
+              diagnosis: "Static Client Demo: Echo request resolved with nominal latency."
+            },
+            services: (this.selectedDevice.services || []).map(s => ({
+              port: s.port,
+              name: s.name,
+              status: "OPEN",
+              is_open: true,
+              rtt_ms: parseFloat((1.8 + Math.random() * 1.2).toFixed(2)),
+              diagnosis: "SYN-ACK 3-way handshake established successfully."
+            }))
+          });
+        }, 350);
+      }
+    } catch (err) {
+      if (probeBox) {
+        probeBox.innerHTML = `<div style="color: #ef4444;">Diagnostic probe failed: ${err.message}</div>`;
+      }
+    } finally {
+      if (probeBtn) {
+        probeBtn.disabled = false;
+        probeBtn.innerHTML = `
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px; vertical-align: middle;">
+            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+          </svg>
+          Execute Live ICMP & TCP Probe
+        `;
+      }
+    }
+  }
+
+  renderProbeResults(data) {
+    const probeBox = document.getElementById("modal-probe-results");
+    if (!probeBox) return;
+
+    const icmp = data.icmp || {};
+    const services = data.services || [];
+    const isReachable = icmp.reachable;
+    const statusColor = isReachable ? "#10b981" : "#ef4444";
+
+    let servicesHtml = "";
+    if (services.length > 0) {
+      servicesHtml = `
+        <div style="margin-top: 10px;">
+          <strong style="color: #94a3b8; font-size: 0.72rem; text-transform: uppercase;">TCP Service Probes (Socket Connect):</strong>
+          <table style="width: 100%; margin-top: 4px; border-collapse: collapse; font-size: 0.72rem;">
+            <thead>
+              <tr style="color: #64748b; border-bottom: 1px solid #1e293b; text-align: left;">
+                <th style="padding: 3px 6px;">Port</th>
+                <th style="padding: 3px 6px;">Service</th>
+                <th style="padding: 3px 6px;">State</th>
+                <th style="padding: 3px 6px;">RTT</th>
+                <th style="padding: 3px 6px;">Diagnosis</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${services.map(s => `
+                <tr style="border-bottom: 1px solid rgba(255,255,255,0.04);">
+                  <td style="padding: 4px 6px; font-family: monospace; color: #38bdf8;">${s.port}</td>
+                  <td style="padding: 4px 6px; color: #f8fafc;">${s.name}</td>
+                  <td style="padding: 4px 6px;">
+                    <span style="color: ${s.is_open ? '#10b981' : '#ef4444'}; font-weight: 700;">
+                      ${s.status}
+                    </span>
+                  </td>
+                  <td style="padding: 4px 6px; font-family: monospace; color: #94a3b8;">${s.rtt_ms ? s.rtt_ms + 'ms' : '--'}</td>
+                  <td style="padding: 4px 6px; color: #64748b; font-size: 0.68rem;">${s.diagnosis || ''}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    } else {
+      servicesHtml = `<div style="margin-top: 8px; color: #64748b; font-size: 0.72rem;">No configured TCP services registered for this host.</div>`;
+    }
+
+    probeBox.innerHTML = `
+      <div style="border-bottom: 1px solid #1e293b; padding-bottom: 8px; margin-bottom: 8px;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <div style="font-weight: 700; color: #f8fafc;">
+            Diagnostic Probe: <span style="font-family: monospace; color: #38bdf8;">${data.ip_address}</span>
+          </div>
+          <span style="font-size: 0.7rem; font-weight: 700; padding: 2px 6px; border-radius: 4px; background: ${isReachable ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)'}; color: ${statusColor};">
+            ${icmp.status || (isReachable ? 'REACHABLE' : 'UNREACHABLE')}
+          </span>
+        </div>
+        <div style="display: flex; gap: 16px; margin-top: 6px; font-size: 0.72rem; color: #94a3b8;">
+          <div>Latency RTT: <strong style="color: #f8fafc; font-family: monospace;">${icmp.rtt_ms !== undefined ? icmp.rtt_ms + ' ms' : '--'}</strong></div>
+          <div>Packet Loss: <strong style="color: ${icmp.packet_loss_percent > 0 ? '#ef4444' : '#10b981'}; font-family: monospace;">${icmp.packet_loss_percent !== undefined ? icmp.packet_loss_percent + '%' : '0.0%'}</strong></div>
+        </div>
+        <div style="margin-top: 4px; font-size: 0.7rem; color: #64748b;">
+          ${icmp.diagnosis || ''}
+        </div>
+      </div>
+      ${servicesHtml}
+      <div style="margin-top: 8px; font-size: 0.65rem; color: #475569; text-align: right;">
+        Sample recorded to telemetry database • Timestamp: ${new Date().toLocaleTimeString()}
+      </div>
+    `;
   }
 
   openAttackModal() {
@@ -434,15 +618,26 @@ class SocApplication {
           created_at: new Date().toISOString()
         });
         this.lossChart.pushValue(12.5);
+      } else if (scenario === 'rogue_mac') {
+        const target = this.devices.find(d => d.id === 'sw-core-a');
+        if (target) target.status = 'CRITICAL';
+        this.alerts.unshift({
+          id: `ALT-MAC-${Math.floor(Math.random() * 9000 + 1000)}`,
+          device_id: 'sw-core-a',
+          severity: 'CRITICAL',
+          rule_id: 'SEC-R004',
+          mitre_id: 'T1200',
+          title: 'Unauthorized Rogue MAC Detected on Core VLAN',
+          message: 'MAC 00:0C:29:DE:AD:01 is not registered in enterprise whitelist. Switchport auto-quarantined.',
+          status: 'NEW',
+          created_at: new Date().toISOString()
+        });
       }
 
       this.topoViz.setData(this.devices, this.topology.links);
       this.renderAlertsTable();
       this.renderDevicesTable();
       this.updateKpiCounters();
-    }
-  }
-
   _bindUiEvents() {
     document.getElementById("btn-open-attack-modal")?.addEventListener("click", () => this.openAttackModal());
     document.getElementById("btn-close-attack-modal")?.addEventListener("click", () => this.closeAttackModal());

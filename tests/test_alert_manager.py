@@ -71,6 +71,10 @@ class TestAlertManager(unittest.TestCase):
         }
         self.alert_mgr.process_incoming_alert(alert_data)
 
+        # Verify device degraded
+        dev_before = DeviceRepository.get_by_id("fw-test-01", db_path=self.db_path)
+        self.assertEqual(dev_before["status"], "DEGRADED")
+
         # Acknowledge
         ack_success = self.alert_mgr.acknowledge_alert("ALT-LIFE-001", operator="SOC-Mohammed")
         self.assertTrue(ack_success)
@@ -78,6 +82,10 @@ class TestAlertManager(unittest.TestCase):
         # Resolve
         res_success = self.alert_mgr.resolve_alert("ALT-LIFE-001", resolution_note="Host IP blocked on edge ACL")
         self.assertTrue(res_success)
+
+        # Verify device health automatically recovered to ONLINE
+        dev_after = DeviceRepository.get_by_id("fw-test-01", db_path=self.db_path)
+        self.assertEqual(dev_after["status"], "ONLINE")
 
 
 if __name__ == "__main__":

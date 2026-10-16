@@ -62,7 +62,11 @@ class AlertManager:
     def resolve_alert(self, alert_id: str, resolution_note: str = "Threat mitigated", db_path: Optional[str] = None) -> bool:
         """Resolves alert and restores device health if no other critical alerts remain."""
         target_db = db_path or self.db_path
+        alert = AlertRepository.get_by_id(alert_id, db_path=target_db)
         success = AlertRepository.resolve(alert_id, note=resolution_note, db_path=target_db)
         if success:
             logger.info(f"Alert {alert_id} marked as RESOLVED. Note: {resolution_note}")
+            if alert and "device_id" in alert:
+                new_status = DeviceRepository.recompute_status(alert["device_id"], db_path=target_db)
+                logger.info(f"Device {alert['device_id']} health dynamically recomputed to: {new_status}")
         return success

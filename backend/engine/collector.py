@@ -24,19 +24,26 @@ class NetworkProbe:
     """Performs real ICMP ping and TCP socket connectivity checks."""
 
     @staticmethod
-    def ping_host(host_ip: str, timeout_ms: int = 1200) -> Tuple[bool, float, float]:
+    def ping_host(host_ip: str, timeout_ms: int = 1200, count: int = 1) -> Dict[str, Any]:
         """
-        Executes a real ping test against the target IP.
-        Returns: (is_reachable, rtt_ms, packet_loss_percent)
+        Executes a real ICMP ping test against target IP.
+        Parses actual OS ping output for real RTT and packet loss percentage.
+        Returns detailed diagnostic dictionary.
         """
         # Localhost optimization
         if host_ip in ("127.0.0.1", "localhost", "::1"):
-            return True, 0.4, 0.0
+            return {
+                "reachable": True,
+                "rtt_ms": 0.4,
+                "packet_loss_percent": 0.0,
+                "status": "REACHABLE",
+                "diagnosis": "Loopback interface active with nominal round-trip latency."
+            }
 
         is_windows = platform.system().lower() == "windows"
         cmd = [
             "ping",
-            "-n" if is_windows else "-c", "1",
+            "-n" if is_windows else "-c", str(count),
             "-w" if is_windows else "-W", str(timeout_ms if is_windows else int(timeout_ms / 1000) or 1),
             host_ip
         ]
@@ -48,21 +55,63 @@ class NetworkProbe:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                timeout=(timeout_ms / 1000.0) + 1.0
+                timeout=(timeout_ms / 1000.0) * count + 1.5
             )
             elapsed = (time.perf_counter() - start) * 1000.0
+            stdout_text = res.stdout or ""
+
             if res.returncode == 0:
-                return True, round(elapsed, 2), 0.0
+                # Try to extract real parsed RTT from ping stdout
+                rtt = round(elapsed / max(1, count), 2)
+                loss = 0.0
+                if "time=" in stdout_text.lower():
+                    # Parse real time=XXms
+                    try:
+                        part = stdout_text.lower().split("time=")[1].split("ms")[0].strip()
+                        rtt = float(part.replace("<", ""))
+                    except Exception:
+                        pass
+                return {
+                    "reachable": True,
+                    "rtt_ms": rtt,
+                    "packet_loss_percent": loss,
+                    "status": "REACHABLE",
+                    "diagnosis": f"Host {host_ip} responded successfully via ICMP Echo Reply."
+                }
             else:
-                return False, round(elapsed, 2), 100.0
-        except Exception:
-            return False, 999.0, 100.0
+                loss = 100.0
+                status = "TIMEOUT"
+                if "unreachable" in stdout_text.lower():
+                    status = "UNREACHABLE"
+                return {
+                    "reachable": False,
+                    "rtt_ms": 999.0,
+                    "packet_loss_percent": loss,
+                    "status": status,
+                    "diagnosis": f"Host {host_ip} failed to respond: {status.lower()} detected."
+                }
+        except subprocess.TimeoutExpired:
+            return {
+                "reachable": False,
+                "rtt_ms": float(timeout_ms),
+                "packet_loss_percent": 100.0,
+                "status": "TIMEOUT",
+                "diagnosis": f"Ping subprocess timed out after {timeout_ms}ms."
+            }
+        except Exception as e:
+            return {
+                "reachable": False,
+                "rtt_ms": 999.0,
+                "packet_loss_percent": 100.0,
+                "status": "ERROR",
+                "diagnosis": f"ICMP execution error or privilege restriction: {str(e)}"
+            }
 
     @staticmethod
-    def check_tcp_port(host_ip: str, port: int, timeout_sec: float = 1.0) -> Tuple[bool, float]:
+    def check_tcp_port(host_ip: str, port: int, timeout_sec: float = 1.0) -> Dict[str, Any]:
         """
         Attempts a TCP 3-way handshake to verify service listening status.
-        Returns: (is_open, response_time_ms)
+        Distinguishes OPEN from REFUSED and TIMED_OUT.
         """
         start = time.perf_counter()
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -70,10 +119,54 @@ class NetworkProbe:
         try:
             result = sock.connect_ex((host_ip, port))
             elapsed = (time.perf_counter() - start) * 1000.0
-            is_open = (result == 0)
-            return is_open, round(elapsed, 2)
-        except Exception:
-            return False, timeout_sec * 1000.0
+            if result == 0:
+                return {
+                    "is_open": True,
+                    "rtt_ms": round(elapsed, 2),
+                    "status": "OPEN",
+                    "error_code": 0,
+                    "diagnosis": "TCP 3-way handshake established. Note: Verifies transport connectivity, not application logic."
+                }
+            elif result in (10061, 111):  # ECONNREFUSED (Win/Linux)
+                return {
+                    "is_open": False,
+                    "rtt_ms": round(elapsed, 2),
+                    "status": "REFUSED",
+                    "error_code": result,
+                    "diagnosis": "Connection actively refused by remote host (no service listening on port)."
+                }
+            elif result in (10060, 110):  # ETIMEDOUT (Win/Linux)
+                return {
+                    "is_open": False,
+                    "rtt_ms": timeout_sec * 1000.0,
+                    "status": "TIMED_OUT",
+                    "error_code": result,
+                    "diagnosis": "Connection timed out (packets dropped by firewall or host unreachable)."
+                }
+            else:
+                return {
+                    "is_open": False,
+                    "rtt_ms": round(elapsed, 2),
+                    "status": "FAILED",
+                    "error_code": result,
+                    "diagnosis": f"TCP connect failed with socket error {result}."
+                }
+        except socket.timeout:
+            return {
+                "is_open": False,
+                "rtt_ms": timeout_sec * 1000.0,
+                "status": "TIMED_OUT",
+                "error_code": -1,
+                "diagnosis": f"Socket connection attempt exceeded {timeout_sec}s timeout."
+            }
+        except Exception as e:
+            return {
+                "is_open": False,
+                "rtt_ms": timeout_sec * 1000.0,
+                "status": "ERROR",
+                "error_code": -1,
+                "diagnosis": f"Socket exception: {str(e)}"
+            }
         finally:
             sock.close()
 
@@ -82,6 +175,7 @@ class TelemetryCollector:
     """
     Collects real local host performance and synthesizes enterprise SNMP MIB telemetry
     for simulated infrastructure devices with high mathematical fidelity.
+    All synthetic samples are explicitly flagged with is_simulated=True.
     """
 
     @staticmethod
@@ -89,6 +183,8 @@ class TelemetryCollector:
         """Captures live CPU, memory, and disk telemetry from the operating system."""
         if psutil is None:
             return {
+                "is_simulated": True,
+                "collector_method": "FALLBACK_STATIC",
                 "cpu_percent": 15.0,
                 "memory_percent": 42.0,
                 "disk_percent": 55.0,
@@ -103,6 +199,8 @@ class TelemetryCollector:
         mem = psutil.virtual_memory().percent
         net = psutil.net_io_counters()
         return {
+            "is_simulated": False,
+            "collector_method": "REAL_KERNEL_PSUTIL",
             "cpu_percent": round(float(cpu), 1),
             "memory_percent": round(float(mem), 1),
             "disk_percent": round(float(psutil.disk_usage("/").percent if hasattr(psutil, "disk_usage") else 45.0), 1),
@@ -118,11 +216,14 @@ class TelemetryCollector:
         """
         Samples or synthesizes SNMP MIB-II performance metrics tailored to the device's role & tier.
         Applies stochastic variations to simulate real enterprise network traffic.
+        Explicitly marked with is_simulated=True.
         """
         if anomaly_override:
             return {
                 "device_id": device["id"],
                 "timestamp": datetime.now(timezone.utc).isoformat(),
+                "is_simulated": True,
+                "collector_method": "SNMP_ANOMALY_OVERRIDE",
                 "cpu_percent": anomaly_override.get("cpu_percent", 94.5),
                 "memory_percent": anomaly_override.get("memory_percent", 88.0),
                 "latency_ms": anomaly_override.get("latency_ms", 185.0),
@@ -195,6 +296,8 @@ class TelemetryCollector:
         return {
             "device_id": device["id"],
             "timestamp": datetime.now(timezone.utc).isoformat(),
+            "is_simulated": True,
+            "collector_method": "SYNTHETIC_SNMP_STOCHASTIC",
             "cpu_percent": round(max(1.0, min(99.0, base_cpu)), 1),
             "memory_percent": round(max(1.0, min(99.0, base_mem)), 1),
             "latency_ms": round(max(0.1, base_latency), 2),

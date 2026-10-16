@@ -20,11 +20,28 @@ class EventCorrelator:
     complex multi-stage network attacks and infrastructure anomalies.
     """
 
-    def __init__(self):
+    def __init__(self, authorized_macs: Optional[List[str]] = None):
         # In-memory sliding windows for high-throughput stream processing
         self._auth_failures: List[Dict[str, Any]] = []
         self._port_attempts: List[Dict[str, Any]] = []
+        self._link_transitions: List[Dict[str, Any]] = []
         self._baseline_history: Dict[str, List[float]] = defaultdict(list)
+        self._authorized_macs: set = set(m.upper().strip() for m in (authorized_macs or [
+            "00:1B:17:A1:01:01",
+            "00:1B:17:A1:01:02",
+            "00:22:BD:C0:01:FE",
+            "00:1A:A0:D4:02:01",
+            "00:1A:A0:D4:02:02",
+            "52:54:00:8C:03:0A",
+            "52:54:00:8C:03:14",
+            "00:0C:29:4F:04:0A",
+            "52:54:00:E1:04:32",
+            "00:50:56:B2:05:0A",
+            "00:50:56:B2:05:0B",
+            "00:1E:F7:61:0A:01",
+            "00:28:F8:8C:0A:69",
+            "AC:CC:8E:55:14:0F"
+        ]))
 
     def record_auth_event(self, source_ip: str, target_device_id: str, success: bool, protocol: str = "SSH") -> None:
         """Records an authentication attempt in the sliding window."""
@@ -47,11 +64,22 @@ class EventCorrelator:
         })
         self._clean_old_events()
 
+    def record_link_transition(self, device_id: str, interface: str, state: str) -> None:
+        """Records a physical/logical interface state transition."""
+        self._link_transitions.append({
+            "device_id": device_id,
+            "interface": interface,
+            "state": state,
+            "timestamp": datetime.now(timezone.utc)
+        })
+        self._clean_old_events()
+
     def _clean_old_events(self, max_age_seconds: int = 120) -> None:
         """Evicts expired events outside the correlation window."""
         cutoff = datetime.now(timezone.utc) - timedelta(seconds=max_age_seconds)
         self._auth_failures = [e for e in self._auth_failures if e["timestamp"] > cutoff]
         self._port_attempts = [e for e in self._port_attempts if e["timestamp"] > cutoff]
+        self._link_transitions = [e for e in self._link_transitions if e["timestamp"] > cutoff]
 
     def check_brute_force(self) -> List[Dict[str, Any]]:
         """
@@ -119,6 +147,67 @@ class EventCorrelator:
                     "message": (
                         f"Hostile port scan detected from {src_ip} targeting {target_id}. "
                         f"{len(ports)} unique ports scanned in {window_sec}s (e.g. {sample_ports})."
+                    ),
+                    "mitre_id": rule["mitre_id"],
+                    "status": "NEW",
+                    "created_at": datetime.now(timezone.utc).isoformat()
+                })
+        return alerts
+
+    def check_rogue_mac(self, device_id: str, mac_address: str, vlan: str = "VLAN-10-CORE") -> Optional[Dict[str, Any]]:
+        """
+        Detects unauthorized hardware MAC addresses on sensitive enterprise segments.
+        Rule: SEC-R004 / MITRE T1200
+        """
+        rule = DETECTION_RULES["ROGUE_MAC_DETECTED"]
+        clean_mac = mac_address.upper().strip()
+        if clean_mac and clean_mac not in self._authorized_macs:
+            alert_id = f"ALT-ROGUE-{uuid.uuid4().hex[:8].upper()}"
+            return {
+                "id": alert_id,
+                "device_id": device_id,
+                "rule_id": rule["id"],
+                "severity": rule["severity"],
+                "title": f"{rule['name']} Detected",
+                "message": (
+                    f"Unauthorized MAC address {clean_mac} discovered on switch port of {device_id} "
+                    f"in sensitive {vlan}. Device not found in enterprise inventory whitelist."
+                ),
+                "mitre_id": rule["mitre_id"],
+                "status": "NEW",
+                "created_at": datetime.now(timezone.utc).isoformat()
+            }
+        return None
+
+    def check_interface_flapping(self) -> List[Dict[str, Any]]:
+        """
+        Detects unstable backbone links undergoing rapid state flapping transitions.
+        Rule: SEC-R005 / MITRE NMS-NET-01
+        """
+        rule = DETECTION_RULES["INTERFACE_FLAPPING"]
+        threshold = rule["threshold_transitions"]
+        window_sec = rule["window_seconds"]
+        cutoff = datetime.now(timezone.utc) - timedelta(seconds=window_sec)
+
+        counts = defaultdict(int)
+        for ev in self._link_transitions:
+            if ev["timestamp"] >= cutoff:
+                key = (ev["device_id"], ev["interface"])
+                counts[key] += 1
+
+        alerts = []
+        for (dev_id, iface), transition_count in counts.items():
+            if transition_count >= threshold:
+                alert_id = f"ALT-FLAP-{uuid.uuid4().hex[:8].upper()}"
+                alerts.append({
+                    "id": alert_id,
+                    "device_id": dev_id,
+                    "rule_id": rule["id"],
+                    "severity": rule["severity"],
+                    "title": f"{rule['name']} on {iface}",
+                    "message": (
+                        f"Interface {iface} on {dev_id} experienced {transition_count} state transitions "
+                        f"within {window_sec}s. Indicative of fiber degradation, transceiver fault, or STP loop."
                     ),
                     "mitre_id": rule["mitre_id"],
                     "status": "NEW",

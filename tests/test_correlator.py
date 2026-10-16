@@ -74,6 +74,38 @@ class TestEventCorrelator(unittest.TestCase):
         for a in alerts:
             self.assertEqual(a["severity"], "CRITICAL")
 
+    def test_rogue_mac_detection(self):
+        target = "sw-core-a"
+        # Authorized MAC should return None
+        authorized_mac = "00:1A:A0:D4:02:01"
+        self.assertIsNone(self.correlator.check_rogue_mac(target, authorized_mac))
+
+        # Unknown / unauthorized MAC on sensitive VLAN should trigger SEC-R004
+        unauthorized_mac = "B4:2E:99:AA:BB:CC"
+        alert = self.correlator.check_rogue_mac(target, unauthorized_mac, vlan="VLAN-20-CORE")
+        self.assertIsNotNone(alert)
+        self.assertEqual(alert["rule_id"], "SEC-R004")
+        self.assertEqual(alert["severity"], "HIGH")
+        self.assertEqual(alert["mitre_id"], "T1200")
+
+    def test_interface_flapping_detection(self):
+        device = "sw-core-a"
+        iface = "Te1/0/1"
+
+        # Record 2 state transitions (below threshold of 4)
+        self.correlator.record_link_transition(device, iface, "DOWN")
+        self.correlator.record_link_transition(device, iface, "UP")
+        self.assertEqual(len(self.correlator.check_interface_flapping()), 0)
+
+        # Record 2 more state transitions (total 4 -> triggers threshold)
+        self.correlator.record_link_transition(device, iface, "DOWN")
+        self.correlator.record_link_transition(device, iface, "UP")
+        alerts = self.correlator.check_interface_flapping()
+        self.assertEqual(len(alerts), 1)
+        self.assertEqual(alerts[0]["rule_id"], "SEC-R005")
+        self.assertEqual(alerts[0]["severity"], "MEDIUM")
+        self.assertIn("Te1/0/1", alerts[0]["message"])
+
 
 if __name__ == "__main__":
     unittest.main()

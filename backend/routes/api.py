@@ -8,7 +8,14 @@ from typing import Dict, Any
 from datetime import datetime, timezone
 
 from backend.config import VERSION, ENTERPRISE_NAME, SOC_NAME
-from backend.database import get_connection, DeviceRepository, AlertRepository, TelemetryRepository
+from backend.database import (
+    get_connection,
+    DeviceRepository,
+    AlertRepository,
+    TelemetryRepository,
+    SecurityEventRepository,
+    AuditLogRepository
+)
 from backend.engine.collector import NetworkProbe, TelemetryCollector
 from backend.engine.correlator import EventCorrelator
 from backend.engine.alert_manager import AlertManager
@@ -132,23 +139,30 @@ def probe_device(device_id: str):
     if not device:
         return jsonify({"error": f"Device '{device_id}' not found"}), 404
 
-    is_reachable, rtt_ms, loss_pct = NetworkProbe.ping_host(device["ip_address"])
+    ping_res = NetworkProbe.ping_host(device["ip_address"])
+    is_reachable = ping_res["reachable"]
+    rtt_ms = ping_res["rtt_ms"]
+    loss_pct = ping_res["packet_loss_percent"]
 
     port_results = []
     for svc in device.get("services", []):
         port = svc.get("port")
         if port:
-            is_open, resp_ms = NetworkProbe.check_tcp_port(device["ip_address"], port)
+            port_res = NetworkProbe.check_tcp_port(device["ip_address"], port)
             port_results.append({
                 "port": port,
                 "name": svc.get("name", "Unknown"),
-                "status": "OPEN" if is_open else "CLOSED",
-                "rtt_ms": resp_ms
+                "status": port_res["status"],
+                "is_open": port_res["is_open"],
+                "rtt_ms": port_res["rtt_ms"],
+                "diagnosis": port_res["diagnosis"]
             })
 
-    # Save a telemetry sample based on probe results
+    # Save a telemetry sample based on probe results (marked as real probe)
     sample = {
         "device_id": device_id,
+        "is_simulated": False,
+        "collector_method": "REAL_ICMP_TCP_PROBE",
         "cpu_percent": 35.0,
         "memory_percent": 50.0,
         "latency_ms": rtt_ms,
@@ -161,34 +175,40 @@ def probe_device(device_id: str):
 
     return jsonify({
         "device_id": device_id,
+        "hostname": device["hostname"],
         "ip_address": device["ip_address"],
-        "icmp": {
-            "reachable": is_reachable,
-            "rtt_ms": rtt_ms,
-            "packet_loss_percent": loss_pct
-        },
+        "icmp": ping_res,
         "services": port_results,
         "timestamp": datetime.now(timezone.utc).isoformat()
     })
 
 
+
 @api_bp.route("/devices/<device_id>/quarantine", methods=["POST"])
 def toggle_quarantine(device_id: str):
-    """Enforces or releases network quarantine / port isolation on a host."""
+    """
+    Enforces or releases network quarantine / port isolation on a host.
+    Note: Operates at the software NMS routing level and logs to compliance audit trail.
+    """
     device = DeviceRepository.get_by_id(device_id)
     if not device:
         return jsonify({"error": f"Device '{device_id}' not found"}), 404
 
     req_json = request.get_json(silent=True) or {}
     quarantine_state = req_json.get("quarantine", not device["is_quarantined"])
+    operator = req_json.get("operator", "SOC-Operator")
+    reason = req_json.get("reason", "Administrative software isolation via NetSentinel Console")
 
-    DeviceRepository.set_quarantine(device_id, quarantine_state)
+    DeviceRepository.set_quarantine(device_id, quarantine_state, operator=operator, reason=reason)
     action_text = "quarantined" if quarantine_state else "released from quarantine"
     
     return jsonify({
-        "message": f"Device '{device_id}' has been {action_text}.",
+        "status": "ACCEPTED",
+        "isolation_type": "SOFTWARE_NMS_ROUTING_FILTER",
+        "message": f"Device '{device_id}' has been {action_text} by {operator}.",
         "device_id": device_id,
-        "is_quarantined": quarantine_state
+        "is_quarantined": quarantine_state,
+        "audit_note": "Host traffic simulated as dropped (100% loss) in telemetry collector."
     })
 
 
@@ -214,6 +234,9 @@ def get_live_telemetry():
         total_latency += s["latency_ms"]
 
     avg_lat = round(total_latency / len(devices), 2) if devices else 0.0
+
+    # Prune historical samples beyond retention limit to prevent database growth
+    TelemetryRepository.prune_old_samples(keep_per_device=120)
 
     return jsonify({
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -259,6 +282,98 @@ def resolve_alert(alert_id: str):
     return jsonify({"message": f"Alert '{alert_id}' resolved."})
 
 
+@api_bp.route("/events/ingest", methods=["POST"])
+def ingest_event():
+    """
+    Ingests raw security events into the SIEM pipeline.
+    Supports single event object or array of event objects.
+    Evaluates correlation rules and triggers stateful alerts.
+    """
+    payload = request.get_json(silent=True)
+    if not payload:
+        return jsonify({"error": "JSON body is required."}), 400
+
+    items = payload if isinstance(payload, list) else [payload]
+    if not items:
+        return jsonify({"error": "No events provided."}), 400
+
+    triggered_alerts = []
+    ingested_count = 0
+
+    for data in items:
+        source_ip = data.get("source_ip")
+        target_id = data.get("target_device_id") or data.get("device_id")
+        event_type = data.get("event_type", "GENERIC_EVENT").upper()
+
+        if not source_ip or not target_id:
+            continue
+
+        normalized = dict(data)
+        normalized["target_device_id"] = target_id
+        SecurityEventRepository.insert(normalized)
+        ingested_count += 1
+
+        if event_type == "AUTH_FAILURE":
+            correlator.record_auth_event(source_ip, target_id, success=False, protocol=data.get("protocol", "SSH"))
+            for a in correlator.check_brute_force():
+                al = alert_manager.process_incoming_alert(a)
+                if al:
+                    triggered_alerts.append(al)
+
+        elif event_type == "PORT_ATTEMPT":
+            port = int(data.get("port", 0))
+            if port > 0:
+                correlator.record_port_attempt(source_ip, target_id, port=port)
+                for a in correlator.check_port_scan():
+                    al = alert_manager.process_incoming_alert(a)
+                    if al:
+                        triggered_alerts.append(al)
+
+        elif event_type == "MAC_OBSERVED":
+            mac = data.get("mac_address", "")
+            vlan = data.get("vlan", "VLAN-10-CORE")
+            alert = correlator.check_rogue_mac(target_id, mac, vlan=vlan)
+            if alert:
+                al = alert_manager.process_incoming_alert(alert)
+                if al:
+                    triggered_alerts.append(al)
+
+        elif event_type == "LINK_TRANSITION":
+            iface = data.get("interface", "eth0")
+            state = data.get("state", "DOWN")
+            correlator.record_link_transition(target_id, iface, state)
+            for a in correlator.check_interface_flapping():
+                al = alert_manager.process_incoming_alert(a)
+                if al:
+                    triggered_alerts.append(al)
+
+    if ingested_count == 0:
+        return jsonify({"error": "No valid events ingested. Fields 'source_ip' and 'target_device_id' (or 'device_id') are required."}), 400
+
+    return jsonify({
+        "status": "INGESTED",
+        "ingested_count": ingested_count,
+        "alerts_triggered_count": len(triggered_alerts),
+        "alerts": triggered_alerts
+    }), 201
+
+
+@api_bp.route("/events", methods=["GET"])
+def list_events():
+    """Returns raw SIEM ingested security event stream."""
+    limit = int(request.args.get("limit", 50))
+    events = SecurityEventRepository.list_events(limit=limit)
+    return jsonify({"count": len(events), "events": events})
+
+
+@api_bp.route("/audit", methods=["GET"])
+def list_audit_logs():
+    """Returns compliance audit logs of all operator actions."""
+    limit = int(request.args.get("limit", 50))
+    logs = AuditLogRepository.list_logs(limit=limit)
+    return jsonify({"count": len(logs), "logs": logs})
+
+
 @api_bp.route("/simulation/attack", methods=["POST"])
 def simulate_attack():
     """Triggers realistic simulated cyber attacks to test detection & alerting."""
@@ -274,7 +389,12 @@ def simulate_attack():
         res = attack_simulator.trigger_port_scan(target_id=target_id)
     elif attack_type in ("link_flap", "flap"):
         res = attack_simulator.trigger_link_flap(device_id=target_id)
+    elif attack_type in ("rogue_mac", "rogue"):
+        alert = correlator.check_rogue_mac(target_id, mac_address="DE:AD:BE:EF:00:99", vlan="VLAN-30-DATABASE")
+        if alert:
+            alert_manager.process_incoming_alert(alert)
+        res = {"scenario": "ROGUE_MAC", "target": target_id, "alert_triggered": bool(alert)}
     else:
-        return jsonify({"error": f"Unknown attack type '{attack_type}'. Choose: ddos, brute_force, port_scan, link_flap."}), 400
+        return jsonify({"error": f"Unknown attack type '{attack_type}'. Choose: ddos, brute_force, port_scan, link_flap, rogue_mac."}), 400
 
     return jsonify({"status": "SUCCESS", "result": res})
