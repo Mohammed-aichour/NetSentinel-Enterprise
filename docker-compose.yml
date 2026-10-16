@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  netsentinel-soc:
+    build: .
+    container_name: netsentinel-enterprise-soc
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - NETSENTINEL_HOST=0.0.0.0
+      - NETSENTINEL_PORT=8080
+      - NETSENTINEL_DEBUG=false
+      - NETSENTINEL_POLL_INTERVAL=5
+    volumes:
+      - netsentinel-data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/v1/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+volumes:
+  netsentinel-data:
+    driver: local

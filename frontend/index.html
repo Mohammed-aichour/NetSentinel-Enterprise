@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NetSentinel Enterprise — SOC Cyber Defense & Telemetry Platform</title>
+  <link rel="stylesheet" href="css/soc.css">
+</head>
+<body>
+
+  <!-- Top SOC Navigation Bar -->
+  <header class="soc-header">
+    <div class="brand-section">
+      <div class="brand-logo">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+          <path d="M9 12l2 2 4-4"/>
+        </svg>
+      </div>
+      <div>
+        <div class="brand-title">
+          NetSentinel <span style="font-weight: 400; color: #94a3b8;">Enterprise</span>
+          <span class="badge-tag">SIEM & NMS v2.4</span>
+        </div>
+        <div style="font-size: 0.7rem; color: #64748b;">UniversiaCorp Global Cyber Defense Operations Center (CDOC)</div>
+      </div>
+    </div>
+
+    <div class="header-metrics">
+      <div class="kpi-pill">
+        <span class="kpi-label">System Time</span>
+        <span class="kpi-val" id="soc-clock">00:00:00 UTC</span>
+      </div>
+      <div class="kpi-pill">
+        <span class="kpi-label">Platform Engine</span>
+        <span class="kpi-val" style="color: #10b981; display: flex; align-items: center; gap: 6px;">
+          <span class="pulse-dot"></span> OPERATIONAL
+        </span>
+      </div>
+      <div class="kpi-pill">
+        <span class="kpi-label">Operation Mode</span>
+        <span class="kpi-val" id="mode-badge" style="color: #38bdf8; font-size: 0.75rem;">DETECTING...</span>
+      </div>
+    </div>
+
+    <div class="header-actions">
+      <button class="btn btn-danger" id="btn-open-attack-modal">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+          <line x1="12" y1="9" x2="12" y2="13"/>
+          <line x1="12" y1="17" x2="12.01" y2="17"/>
+        </svg>
+        Attack Simulator
+      </button>
+      <button class="btn btn-secondary" onclick="window.socApp.refreshData()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="23 4 23 10 17 10"/>
+          <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+        </svg>
+        Sync Telemetry
+      </button>
+    </div>
+  </header>
+
+  <!-- Main SOC Workspace Container -->
+  <main class="soc-container">
+
+    <!-- KPI Status Cards -->
+    <section class="kpi-grid">
+      <div class="kpi-card brand">
+        <span class="kpi-title">Monitored Infrastructure</span>
+        <span class="kpi-number" id="kpi-total-nodes">--</span>
+        <span class="kpi-meta">Core routers, switches, firewalls & hosts</span>
+      </div>
+      <div class="kpi-card success">
+        <span class="kpi-title">Healthy & Online</span>
+        <span class="kpi-number" id="kpi-online-nodes" style="color: #10b981;">--</span>
+        <span class="kpi-meta">SLA compliance 99.98%</span>
+      </div>
+      <div class="kpi-card critical">
+        <span class="kpi-title">Critical / Quarantined</span>
+        <span class="kpi-number" id="kpi-critical-nodes" style="color: #ef4444;">--</span>
+        <span class="kpi-meta">Immediate operator action required</span>
+      </div>
+      <div class="kpi-card warning">
+        <span class="kpi-title">Active Security Threats</span>
+        <span class="kpi-number" id="kpi-active-threats" style="color: #f59e0b;">--</span>
+        <span class="kpi-meta">MITRE ATT&CK correlated events</span>
+      </div>
+    </section>
+
+    <!-- Center Workspace: Topology Map & Telemetry Gauges -->
+    <section class="soc-workspace">
+      
+      <!-- Interactive Network Topology Canvas -->
+      <div class="panel-card">
+        <div class="panel-header">
+          <div class="panel-title">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2">
+              <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
+              <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
+            </svg>
+            Interactive Network Topology Visualizer
+          </div>
+          <div style="font-size: 0.72rem; color: #94a3b8;">
+            Drag nodes to rearrange • Click to inspect telemetry
+          </div>
+        </div>
+        <div class="panel-body" style="padding: 0;">
+          <div class="topology-container">
+            <canvas id="topology-canvas"></canvas>
+            <div class="topology-legend">
+              <div class="legend-item"><span class="legend-dot" style="background:#10b981;"></span> Online</div>
+              <div class="legend-item"><span class="legend-dot" style="background:#f59e0b;"></span> Degraded</div>
+              <div class="legend-item"><span class="legend-dot" style="background:#ef4444;"></span> Critical / Attack</div>
+              <div class="legend-item"><span class="legend-dot" style="background:#64748b;"></span> Quarantined</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Real-Time Telemetry Performance Charts -->
+      <div class="panel-card">
+        <div class="panel-header">
+          <div class="panel-title">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2">
+              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+            </svg>
+            Live Cluster Telemetry
+          </div>
+          <span class="badge-tag">SNMP & Flow Stream</span>
+        </div>
+        <div class="panel-body telemetry-charts">
+          
+          <div class="chart-card">
+            <div class="chart-header">
+              <span>Aggregate Throughput (Inbound)</span>
+              <span style="color:#38bdf8;">Mbps</span>
+            </div>
+            <div class="chart-canvas-wrap">
+              <canvas id="chart-bandwidth"></canvas>
+            </div>
+          </div>
+
+          <div class="chart-card">
+            <div class="chart-header">
+              <span>Cluster Average Latency (ICMP RTT)</span>
+              <span style="color:#10b981;">ms</span>
+            </div>
+            <div class="chart-canvas-wrap">
+              <canvas id="chart-latency"></canvas>
+            </div>
+          </div>
+
+          <div class="chart-card">
+            <div class="chart-header">
+              <span>Interface Packet Loss Rate</span>
+              <span style="color:#ef4444;">%</span>
+            </div>
+            <div class="chart-canvas-wrap">
+              <canvas id="chart-loss"></canvas>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+    </section>
+
+    <!-- Bottom Tables: Incident Feed & Device Catalog -->
+    <section class="tables-grid">
+      
+      <!-- Live Incident Feed -->
+      <div class="panel-card">
+        <div class="panel-header">
+          <div class="panel-title">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2">
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+            </svg>
+            Correlated Security Incidents
+          </div>
+          <span style="font-size: 0.72rem; color: #94a3b8;">SIEM Rule Triggers</span>
+        </div>
+        <div class="panel-body table-responsive" style="padding: 0;">
+          <table class="soc-table">
+            <thead>
+              <tr>
+                <th>Severity</th>
+                <th>Incident Details</th>
+                <th>ATT&CK</th>
+                <th>Target</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="alerts-table-body">
+              <!-- Rendered via app.js -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Infrastructure Inventory Catalog -->
+      <div class="panel-card">
+        <div class="panel-header">
+          <div class="panel-title">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2">
+              <rect x="2" y="2" width="20" height="8" rx="2" ry="2"/>
+              <rect x="2" y="14" width="20" height="8" rx="2" ry="2"/>
+              <line x1="6" y1="6" x2="6.01" y2="6"/>
+              <line x1="6" y1="18" x2="6.01" y2="18"/>
+            </svg>
+            Monitored Devices Inventory
+          </div>
+          <span style="font-size: 0.72rem; color: #94a3b8;">Multi-Tier Topology</span>
+        </div>
+        <div class="panel-body table-responsive" style="padding: 0;">
+          <table class="soc-table">
+            <thead>
+              <tr>
+                <th>Device / IP</th>
+                <th>Tier</th>
+                <th>Role</th>
+                <th>Health</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="devices-table-body">
+              <!-- Rendered via app.js -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </section>
+
+  </main>
+
+  <!-- Modal: Cyber Attack Simulator -->
+  <div class="modal-overlay" id="attack-modal">
+    <div class="modal-box">
+      <div class="modal-header">
+        <div style="font-weight: 700; font-size: 1rem; display: flex; align-items: center; gap: 8px;">
+          <span style="color: #ef4444;">●</span> Inject Simulated Cyber Attack
+        </div>
+        <button class="btn btn-secondary" id="btn-close-attack-modal" style="padding: 4px 10px;">✕</button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size: 0.8rem; color: #94a3b8;">
+          Select a realistic threat scenario to execute against the monitored infrastructure.
+          The SIEM correlator will analyze incoming telemetry, trigger MITRE ATT&CK alerts, and degrade node status in real-time.
+        </p>
+
+        <div class="attack-cards-grid">
+          <button class="attack-btn-card danger" onclick="window.socApp.triggerAttackScenario('ddos')">
+            <div class="attack-btn-title">
+              <span style="color: #ef4444;">💥</span> Volumetric SYN Flood DDoS
+            </div>
+            <div class="attack-btn-desc">
+              894 Mbps traffic surge targeting PA-5450 Perimeter Firewall. Triggers Rule SEC-R003 (T1498.001).
+            </div>
+          </button>
+
+          <button class="attack-btn-card danger" onclick="window.socApp.triggerAttackScenario('brute_force')">
+            <div class="attack-btn-title">
+              <span style="color: #ef4444;">🔑</span> SSH Credential Brute-Force
+            </div>
+            <div class="attack-btn-desc">
+              8 rapid failed logins against Primary PostgreSQL Cluster. Triggers Rule SEC-R001 (T1110.001).
+            </div>
+          </button>
+
+          <button class="attack-btn-card" onclick="window.socApp.triggerAttackScenario('port_scan')">
+            <div class="attack-btn-title">
+              <span style="color: #f59e0b;">🔍</span> Horizontal Port Sweep
+            </div>
+            <div class="attack-btn-desc">
+              Reconnaissance sweep probing 18 ports on Nginx DMZ Reverse Proxy. Triggers Rule SEC-R002 (T1046).
+            </div>
+          </button>
+
+          <button class="attack-btn-card" onclick="window.socApp.triggerAttackScenario('link_flap')">
+            <div class="attack-btn-title">
+              <span style="color: #38bdf8;">⚡</span> Spine Fiber Link Flapping
+            </div>
+            <div class="attack-btn-desc">
+              12.5% packet drop burst & 215ms latency spike on Cisco Nexus Core Backbone. Triggers NMS stability alert.
+            </div>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Device Inspector -->
+  <div class="modal-overlay" id="device-modal">
+    <div class="modal-box">
+      <div class="modal-header">
+        <div style="font-weight: 700; font-size: 1rem; display: flex; align-items: center; gap: 8px;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2">
+            <rect x="2" y="2" width="20" height="8" rx="2" ry="2"/>
+            <rect x="2" y="14" width="20" height="8" rx="2" ry="2"/>
+          </svg>
+          Device Telemetry Inspector
+        </div>
+        <button class="btn btn-secondary" id="btn-close-device-modal" style="padding: 4px 10px;">✕</button>
+      </div>
+      <div class="modal-body">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 0.8rem;">
+          <div><strong style="color:#64748b;">Hostname:</strong> <div id="modal-dev-hostname" style="font-family:monospace; color:#f8fafc;">--</div></div>
+          <div><strong style="color:#64748b;">IP Address:</strong> <div id="modal-dev-ip" style="font-family:monospace; color:#38bdf8;">--</div></div>
+          <div><strong style="color:#64748b;">Network Tier:</strong> <div id="modal-dev-tier" style="color:#f8fafc;">--</div></div>
+          <div><strong style="color:#64748b;">Operational Role:</strong> <div id="modal-dev-role" style="color:#f8fafc;">--</div></div>
+          <div><strong style="color:#64748b;">Hardware / OS:</strong> <div id="modal-dev-vendor" style="color:#f8fafc;">--</div></div>
+          <div><strong style="color:#64748b;">Current Health:</strong> <div id="modal-dev-status" style="font-weight:700;">--</div></div>
+        </div>
+
+        <div style="margin-top: 10px; display: flex; gap: 10px;">
+          <button class="btn btn-primary" onclick="alert('ICMP Probe Executed: Round-trip RTT: 1.2ms, Packet Loss: 0.0%, 3-way handshake verified.')">
+            Execute Live ICMP Probe
+          </button>
+          <button class="btn btn-danger" onclick="window.socApp.quarantineDevice(window.socApp.selectedDevice.id); window.socApp.closeDeviceModal();">
+            Isolate / Quarantine Host
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/topology.js"></script>
+  <script src="js/charts.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
