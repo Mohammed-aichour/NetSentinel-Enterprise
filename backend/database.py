@@ -11,6 +11,7 @@ import ssl
 import json
 import logging
 import sqlite3
+import tempfile
 import ipaddress
 import contextlib
 from datetime import datetime, timezone
@@ -166,8 +167,21 @@ def open_raw_connection(db_path: Optional[str] = None):
         return PgConnectionWrapper(raw_conn)
 
     target_path = db_path or DB_PATH
-    Path(target_path).parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(target_path, timeout=10.0)
+    try:
+        Path(target_path).parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        target_path = str(Path(tempfile.gettempdir()) / "netsentinel.db")
+        try:
+            Path(target_path).parent.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
+
+    try:
+        conn = sqlite3.connect(target_path, timeout=10.0)
+    except sqlite3.OperationalError:
+        target_path = str(Path(tempfile.gettempdir()) / "netsentinel.db")
+        conn = sqlite3.connect(target_path, timeout=10.0)
+
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode = WAL;")
     conn.execute("PRAGMA foreign_keys = ON;")

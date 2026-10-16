@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NetSentinel Enterprise — SOC Cyber Defense & Telemetry Platform</title>
+  <link rel="stylesheet" href="css/soc.css">
+</head>
+<body>
+
+  <!-- Top SOC Navigation Bar -->
+  <header class="soc-header">
+    <div class="brand-section">
+      <div class="brand-logo">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+          <path d="M9 12l2 2 4-4"/>
+        </svg>
+      </div>
+      <div>
+        <div class="brand-title">
+          NetSentinel <span style="font-weight: 400; color: #94a3b8;">Enterprise</span>
+          <span class="badge-tag">SIEM & NMS v2.4</span>
+        </div>
+        <div style="font-size: 0.7rem; color: #64748b;">UniversiaCorp Global Cyber Defense Operations Center (CDOC)</div>
+      </div>
+    </div>
+
+    <div class="header-metrics">
+      <div class="kpi-pill">
+        <span class="kpi-label">System Time</span>
+        <span class="kpi-val" id="soc-clock">00:00:00 UTC</span>
+      </div>
+      <div class="kpi-pill">
+        <span class="kpi-label">Platform Engine</span>
+        <span class="kpi-val" style="color: #10b981; display: flex; align-items: center; gap: 6px;">
+          <span class="pulse-dot"></span> OPERATIONAL
+        </span>
+      </div>
+      <div class="kpi-pill">
+        <span class="kpi-label">Operation Mode</span>
+        <span class="kpi-val" id="mode-badge" style="color: #38bdf8; font-size: 0.75rem;">DETECTING...</span>
+      </div>
+    </div>
+
+    <div class="header-actions">
+      <button class="btn btn-secondary" id="btn-open-settings-modal" style="font-size: 0.75rem;">
+        ⚙️ API & Database
+      </button>
+      <button class="btn btn-secondary" id="btn-open-audit-modal" style="font-size: 0.75rem;">
+        📋 Audit Logs
+      </button>
+      <button class="btn btn-danger" id="btn-open-attack-modal">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+          <line x1="12" y1="9" x2="12" y2="13"/>
+          <line x1="12" y1="17" x2="12.01" y2="17"/>
+        </svg>
+        Attack Simulator
+      </button>
+      <button class="btn btn-secondary" onclick="window.socApp.refreshData()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="23 4 23 10 17 10"/>
+          <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+        </svg>
+        Sync Telemetry
+      </button>
+    </div>
+  </header>
+
+  <!-- Main SOC Workspace Container -->
+  <main class="soc-container">
+
+    <!-- KPI Status Cards -->
+    <section class="kpi-grid">
+      <div class="kpi-card brand">
+        <span class="kpi-title">Monitored Infrastructure</span>
+        <span class="kpi-number" id="kpi-total-nodes">--</span>
+        <span class="kpi-meta">Core routers, switches, firewalls & hosts</span>
+      </div>
+      <div class="kpi-card success">
+        <span class="kpi-title">Healthy & Online</span>
+        <span class="kpi-number" id="kpi-online-nodes" style="color: #10b981;">--</span>
+        <span class="kpi-meta">SLA compliance 99.98%</span>
+      </div>
+      <div class="kpi-card critical">
+        <span class="kpi-title">Critical / Quarantined</span>
+        <span class="kpi-number" id="kpi-critical-nodes" style="color: #ef4444;">--</span>
+        <span class="kpi-meta">Immediate operator action required</span>
+      </div>
+      <div class="kpi-card warning">
+        <span class="kpi-title">Active Security Threats</span>
+        <span class="kpi-number" id="kpi-active-threats" style="color: #f59e0b;">--</span>
+        <span class="kpi-meta">MITRE ATT&CK correlated events</span>
+      </div>
+    </section>
+
+    <!-- Center Workspace: Topology Map & Telemetry Gauges -->
+    <section class="soc-workspace">
+      
+      <!-- Interactive Network Topology Canvas -->
+      <div class="panel-card">
+        <div class="panel-header">
+          <div class="panel-title">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2">
+              <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
+              <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
+            </svg>
+            Interactive Network Topology Visualizer
+          </div>
+          <div style="font-size: 0.72rem; color: #94a3b8;">
+            Drag nodes to rearrange • Click to inspect telemetry
+          </div>
+        </div>
+        <div class="panel-body" style="padding: 0;">
+          <div class="topology-container">
+            <canvas id="topology-canvas"></canvas>
+            <div class="topology-legend">
+              <div class="legend-item"><span class="legend-dot" style="background:#10b981;"></span> Online</div>
+              <div class="legend-item"><span class="legend-dot" style="background:#f59e0b;"></span> Degraded</div>
+              <div class="legend-item"><span class="legend-dot" style="background:#ef4444;"></span> Critical / Attack</div>
+              <div class="legend-item"><span class="legend-dot" style="background:#64748b;"></span> Quarantined</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Real-Time Telemetry Performance Charts -->
+      <div class="panel-card">
+        <div class="panel-header">
+          <div class="panel-title">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2">
+              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+            </svg>
+            Live Cluster Telemetry
+          </div>
+          <span class="badge-tag" id="badge-telemetry-mode">Simulated SNMP Stream</span>
+        </div>
+        <div class="panel-body telemetry-charts">
+          
+          <div class="chart-card">
+            <div class="chart-header">
+              <span>Aggregate Throughput (Inbound)</span>
+              <span style="color:#38bdf8;">Mbps</span>
+            </div>
+            <div class="chart-canvas-wrap">
+              <canvas id="chart-bandwidth"></canvas>
+            </div>
+          </div>
+
+          <div class="chart-card">
+            <div class="chart-header">
+              <span>Cluster Average Latency (ICMP RTT)</span>
+              <span style="color:#10b981;">ms</span>
+            </div>
+            <div class="chart-canvas-wrap">
+              <canvas id="chart-latency"></canvas>
+            </div>
+          </div>
+
+          <div class="chart-card">
+            <div class="chart-header">
+              <span>Interface Packet Loss Rate</span>
+              <span style="color:#ef4444;">%</span>
+            </div>
+            <div class="chart-canvas-wrap">
+              <canvas id="chart-loss"></canvas>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+    </section>
+
+    <!-- Bottom Tables: Incident Feed & Device Catalog -->
+    <section class="tables-grid">
+      
+      <!-- Live Incident Feed -->
+      <div class="panel-card">
+        <div class="panel-header">
+          <div class="panel-title">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2">
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+            </svg>
+            Correlated Security Incidents
+          </div>
+          <span style="font-size: 0.72rem; color: #94a3b8;">SIEM Rule Triggers</span>
+        </div>
+        <div class="panel-body table-responsive" style="padding: 0;">
+          <table class="soc-table">
+            <thead>
+              <tr>
+                <th>Severity</th>
+                <th>Incident Details</th>
+                <th>ATT&CK</th>
+                <th>Target</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="alerts-table-body">
+              <!-- Rendered via app.js -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Infrastructure Inventory Catalog -->
+      <div class="panel-card">
+        <div class="panel-header">
+          <div class="panel-title">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2">
+              <rect x="2" y="2" width="20" height="8" rx="2" ry="2"/>
+              <rect x="2" y="14" width="20" height="8" rx="2" ry="2"/>
+              <line x1="6" y1="6" x2="6.01" y2="6"/>
+              <line x1="6" y1="18" x2="6.01" y2="18"/>
+            </svg>
+            Monitored Devices Inventory
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <button class="btn btn-primary" id="btn-open-add-device" style="font-size: 0.7rem; padding: 3px 8px;">
+              + Add Device
+            </button>
+          </div>
+        </div>
+
+        <!-- Inventory Search & Filter Toolbar -->
+        <div class="soc-toolbar">
+          <div class="soc-toolbar-filters">
+            <input type="text" id="device-search-input" class="soc-input" placeholder="Search hostname, IP, role..." style="width: 180px;">
+            <select id="device-tier-filter" class="soc-select">
+              <option value="">All Tiers</option>
+              <option value="EDGE">EDGE</option>
+              <option value="CORE">CORE</option>
+              <option value="DMZ">DMZ</option>
+              <option value="SERVICES">SERVICES</option>
+              <option value="DATABASE">DATABASE</option>
+              <option value="ACCESS">ACCESS</option>
+            </select>
+            <select id="device-status-filter" class="soc-select">
+              <option value="">All Statuses</option>
+              <option value="ONLINE">ONLINE</option>
+              <option value="DEGRADED">DEGRADED</option>
+              <option value="CRITICAL">CRITICAL</option>
+              <option value="QUARANTINED">QUARANTINED</option>
+            </select>
+            <button class="btn btn-secondary" id="btn-reset-filters" style="font-size: 0.7rem; padding: 4px 8px;">
+              Reset
+            </button>
+          </div>
+          <span style="font-size: 0.7rem; color: #94a3b8;" id="devices-count-badge">Multi-Tier Topology</span>
+        </div>
+
+        <div class="panel-body table-responsive" style="padding: 0;">
+          <table class="soc-table">
+            <thead>
+              <tr>
+                <th>Device / IP</th>
+                <th>Tier</th>
+                <th>Role</th>
+                <th>Health</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="devices-table-body">
+              <!-- Rendered via app.js -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </section>
+
+  </main>
+
+  <!-- Modal: Cyber Attack Simulator -->
+  <div class="modal-overlay" id="attack-modal">
+    <div class="modal-box">
+      <div class="modal-header">
+        <div style="font-weight: 700; font-size: 1rem; display: flex; align-items: center; gap: 8px;">
+          <span style="color: #ef4444;">●</span> Inject Simulated Cyber Attack
+        </div>
+        <button class="btn btn-secondary" id="btn-close-attack-modal" style="padding: 4px 10px;">✕</button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size: 0.8rem; color: #94a3b8;">
+          Select a realistic threat scenario to execute against the monitored infrastructure.
+          The SIEM correlator will analyze incoming telemetry, trigger MITRE ATT&CK alerts, and degrade node status in real-time.
+        </p>
+
+        <div class="attack-cards-grid">
+          <button class="attack-btn-card danger" onclick="window.socApp.triggerAttackScenario('ddos')">
+            <div class="attack-btn-title">
+              <span style="color: #ef4444;">💥</span> Volumetric SYN Flood DDoS
+            </div>
+            <div class="attack-btn-desc">
+              894 Mbps traffic surge targeting PA-5450 Perimeter Firewall. Triggers Rule SEC-R003 (T1498.001).
+            </div>
+          </button>
+
+          <button class="attack-btn-card danger" onclick="window.socApp.triggerAttackScenario('brute_force')">
+            <div class="attack-btn-title">
+              <span style="color: #ef4444;">🔑</span> SSH Credential Brute-Force
+            </div>
+            <div class="attack-btn-desc">
+              8 rapid failed logins against Primary PostgreSQL Cluster. Triggers Rule SEC-R001 (T1110.001).
+            </div>
+          </button>
+
+          <button class="attack-btn-card" onclick="window.socApp.triggerAttackScenario('port_scan')">
+            <div class="attack-btn-title">
+              <span style="color: #f59e0b;">🔍</span> Horizontal Port Sweep
+            </div>
+            <div class="attack-btn-desc">
+              Reconnaissance sweep probing 18 ports on Nginx DMZ Reverse Proxy. Triggers Rule SEC-R002 (T1046).
+            </div>
+          </button>
+
+          <button class="attack-btn-card" onclick="window.socApp.triggerAttackScenario('link_flap')">
+            <div class="attack-btn-title">
+              <span style="color: #38bdf8;">⚡</span> Spine Fiber Link Flapping
+            </div>
+            <div class="attack-btn-desc">
+              12.5% packet drop burst & 215ms latency spike on Cisco Nexus Core Backbone. Triggers NMS stability alert.
+            </div>
+          </button>
+
+          <button class="attack-btn-card danger" onclick="window.socApp.triggerAttackScenario('rogue_mac')">
+            <div class="attack-btn-title">
+              <span style="color: #ef4444;">🛡️</span> Rogue MAC Injection on Core VLAN
+            </div>
+            <div class="attack-btn-desc">
+              Unauthorized MAC 00:0C:29:DE:AD:01 attempts switchport uplink connection. Triggers Rule SEC-R004 (T1200).
+            </div>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Device Inspector -->
+  <div class="modal-overlay" id="device-modal">
+    <div class="modal-box" style="max-width: 680px;">
+      <div class="modal-header">
+        <div style="font-weight: 700; font-size: 1rem; display: flex; align-items: center; gap: 8px;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2">
+            <rect x="2" y="2" width="20" height="8" rx="2" ry="2"/>
+            <rect x="2" y="14" width="20" height="8" rx="2" ry="2"/>
+          </svg>
+          Device Telemetry & Security Inspector
+        </div>
+        <button class="btn btn-secondary" id="btn-close-device-modal" style="padding: 4px 10px;">✕</button>
+      </div>
+      <div class="modal-body">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 0.8rem;">
+          <div><strong style="color:#64748b;">Hostname:</strong> <div id="modal-dev-hostname" style="font-family:monospace; color:#f8fafc;">--</div></div>
+          <div><strong style="color:#64748b;">IP Address:</strong> <div id="modal-dev-ip" style="font-family:monospace; color:#38bdf8;">--</div></div>
+          <div><strong style="color:#64748b;">Network Tier:</strong> <div id="modal-dev-tier" style="color:#f8fafc;">--</div></div>
+          <div><strong style="color:#64748b;">Operational Role:</strong> <div id="modal-dev-role" style="color:#f8fafc;">--</div></div>
+          <div><strong style="color:#64748b;">Hardware / OS:</strong> <div id="modal-dev-vendor" style="color:#f8fafc;">--</div></div>
+          <div><strong style="color:#64748b;">Current Health:</strong> <div id="modal-dev-status" style="font-weight:700;">--</div></div>
+        </div>
+
+        <div style="margin-top: 6px; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+          <span id="modal-telemetry-badge" style="font-size: 0.72rem; padding: 3px 8px; border-radius: 4px; background: rgba(56, 189, 248, 0.12); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.25);">
+            ⚡ Live ICMP / TCP Diagnostic Engine
+          </span>
+          <span style="font-size: 0.72rem; color: #94a3b8;" id="modal-dev-quarantine-status">Isolation: NONE</span>
+        </div>
+
+        <!-- Real-time Probe Results Box -->
+        <div id="modal-probe-results" style="display: none; background: #0b1120; border: 1px solid #1e293b; border-radius: 6px; padding: 12px; margin-top: 10px; font-size: 0.75rem;"></div>
+
+        <div style="margin-top: 12px; display: flex; flex-wrap: wrap; gap: 8px;">
+          <button class="btn btn-primary" id="btn-execute-probe" onclick="window.socApp.probeSelectedDevice()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px; vertical-align: middle;">
+              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+            </svg>
+            Execute Live ICMP & TCP Probe
+          </button>
+          <button class="btn btn-danger" id="btn-toggle-quarantine" onclick="window.socApp.toggleSelectedDeviceQuarantine()">
+            Isolate / Quarantine Host
+          </button>
+          <button class="btn btn-secondary" id="btn-open-edit-device" onclick="window.socApp.openEditSelectedDevice()">
+            Edit Device
+          </button>
+          <button class="btn btn-secondary" id="btn-delete-device" onclick="window.socApp.deleteSelectedDevice()" style="color: #ef4444; border-color: rgba(239, 68, 68, 0.4);">
+            Delete Device
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Add / Edit Device Form -->
+  <div class="modal-overlay" id="device-form-modal">
+    <div class="modal-box" style="max-width: 600px;">
+      <div class="modal-header">
+        <div style="font-weight: 700; font-size: 1rem; display: flex; align-items: center; gap: 8px;">
+          <span style="color: #38bdf8;">●</span> <span id="device-form-title">Add Infrastructure Device</span>
+        </div>
+        <button class="btn btn-secondary" id="btn-close-device-form-modal" style="padding: 4px 10px;">✕</button>
+      </div>
+      <div class="modal-body">
+        <form id="device-form" onsubmit="window.socApp.handleDeviceFormSubmit(event)">
+          <div class="soc-form-grid">
+            <div class="soc-form-group">
+              <label class="soc-form-label" for="form-dev-id">Device Identifier</label>
+              <input type="text" id="form-dev-id" class="soc-input" placeholder="e.g. srv-backup-01" required>
+            </div>
+            <div class="soc-form-group">
+              <label class="soc-form-label" for="form-dev-hostname">FQDN Hostname</label>
+              <input type="text" id="form-dev-hostname" class="soc-input" placeholder="backup.corp.internal" required>
+            </div>
+            <div class="soc-form-group">
+              <label class="soc-form-label" for="form-dev-ip">IPv4 Address</label>
+              <input type="text" id="form-dev-ip" class="soc-input" placeholder="10.0.5.50" required>
+            </div>
+            <div class="soc-form-group">
+              <label class="soc-form-label" for="form-dev-mac">MAC Address</label>
+              <input type="text" id="form-dev-mac" class="soc-input" placeholder="00:1A:2B:3C:4D:5E">
+            </div>
+            <div class="soc-form-group">
+              <label class="soc-form-label" for="form-dev-tier">Network Tier</label>
+              <select id="form-dev-tier" class="soc-select">
+                <option value="ACCESS">ACCESS (Leaf / Workstations)</option>
+                <option value="CORE">CORE (Spine Backbone)</option>
+                <option value="EDGE">EDGE (Perimeter Firewall / BGP)</option>
+                <option value="DMZ">DMZ (WAF / Reverse Proxy)</option>
+                <option value="SERVICES">SERVICES (Active Directory / SIEM)</option>
+                <option value="DATABASE">DATABASE (PostgreSQL / Redis)</option>
+              </select>
+            </div>
+            <div class="soc-form-group">
+              <label class="soc-form-label" for="form-dev-role">Operational Role</label>
+              <input type="text" id="form-dev-role" class="soc-input" placeholder="e.g. Backup Storage Server">
+            </div>
+          </div>
+
+          <div class="soc-form-group" style="margin-top: 10px;">
+            <label class="soc-form-label" for="form-dev-vendor">Hardware / Vendor / OS</label>
+            <input type="text" id="form-dev-vendor" class="soc-input" placeholder="e.g. Ubuntu Linux 24.04 LTS / Dell PowerEdge">
+          </div>
+
+          <div class="soc-form-group" style="margin-top: 10px;">
+            <label class="soc-form-label" for="form-dev-services">Configured Services (port:name, comma separated)</label>
+            <input type="text" id="form-dev-services" class="soc-input" placeholder="e.g. 22:SSH, 80:HTTP, 443:HTTPS, 5432:PostgreSQL">
+          </div>
+
+          <div id="device-form-error" style="color: #ef4444; font-size: 0.75rem; margin-top: 10px; display: none;"></div>
+
+          <div style="margin-top: 16px; display: flex; justify-content: flex-end; gap: 8px;">
+            <button type="button" class="btn btn-secondary" onclick="window.socApp.closeDeviceFormModal()">Cancel</button>
+            <button type="submit" class="btn btn-primary" id="btn-save-device">Save Device</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Compliance Audit Logs -->
+  <div class="modal-overlay" id="audit-modal">
+    <div class="modal-box" style="max-width: 780px;">
+      <div class="modal-header">
+        <div style="font-weight: 700; font-size: 1rem; display: flex; align-items: center; gap: 8px;">
+          <span>📋</span> SOC Operator Compliance Audit Trail
+        </div>
+        <button class="btn btn-secondary" id="btn-close-audit-modal" style="padding: 4px 10px;">✕</button>
+      </div>
+      <div class="modal-body" style="max-height: 480px; overflow-y: auto;">
+        <table class="soc-table" style="width: 100%;">
+          <thead>
+            <tr>
+              <th>Timestamp (UTC)</th>
+              <th>Operator</th>
+              <th>Action</th>
+              <th>Target</th>
+              <th>Details</th>
+            </tr>
+          </thead>
+          <tbody id="audit-table-body">
+            <!-- Rendered via app.js -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: API & Database Persistence Settings -->
+  <div class="modal-overlay" id="settings-modal">
+    <div class="modal-box" style="max-width: 600px;">
+      <div class="modal-header">
+        <div style="font-weight: 700; font-size: 1rem; display: flex; align-items: center; gap: 8px;">
+          <span>⚙️</span> NetSentinel API & Persistence Configuration
+        </div>
+        <button class="btn btn-secondary" id="btn-close-settings-modal" style="padding: 4px 10px;">✕</button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size: 0.8rem; color: #94a3b8;">
+          Configure target API server endpoint. When hosted on Vercel, relative endpoints (<code>/api/v1</code>) connect automatically to the serverless Python backend with PostgreSQL. If hosted statically on GitHub Pages, enter your deployed Vercel domain to unlock live API mode.
+        </p>
+
+        <div class="soc-form-group">
+          <label class="soc-form-label" for="settings-api-url">API Base URL</label>
+          <input type="text" id="settings-api-url" class="soc-input" placeholder="Leave empty for relative (/api/v1) or https://app.vercel.app">
+        </div>
+
+        <div class="soc-form-group">
+          <label class="soc-form-label" for="settings-api-key">API Authorization Key (Optional)</label>
+          <input type="password" id="settings-api-key" class="soc-input" placeholder="Enter NETSENTINEL_API_KEY if configured">
+        </div>
+
+        <div style="background: #0b1120; border: 1px solid #1e293b; border-radius: 6px; padding: 12px; font-size: 0.75rem;">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span style="color: #94a3b8;">Backend Readiness Status:</span>
+            <span id="settings-db-status" class="badge-tag">Checking...</span>
+          </div>
+          <div id="settings-probe-feedback" style="margin-top: 6px; color: #64748b;">
+            Click 'Test Connection' to query <code>/api/v1/ready</code>.
+          </div>
+        </div>
+
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
+          <button class="btn btn-secondary" id="btn-test-connection" onclick="window.socApp.testApiConnection()">
+            Test Connection
+          </button>
+          <div style="display: flex; gap: 8px;">
+            <button class="btn btn-secondary" onclick="window.socApp.closeSettingsModal()">Close</button>
+            <button class="btn btn-primary" id="btn-save-settings" onclick="window.socApp.saveApiSettings()">Save & Reconnect</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/topology.js"></script>
+  <script src="js/charts.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

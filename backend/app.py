@@ -37,12 +37,15 @@ def create_app() -> Flask:
         static_url_path=""
     )
 
-    # Initialize Database Schema & Seed if fresh
-    init_db()
-    existing_devices = DeviceRepository.list_all()
-    if not existing_devices:
-        logger.info("Initializing baseline enterprise topology for UniversiaCorp...")
-        seed_enterprise_topology()
+    # Initialize Database Schema & Seed if fresh, with serverless resilience
+    try:
+        init_db()
+        existing_devices = DeviceRepository.list_all()
+        if not existing_devices:
+            logger.info("Initializing baseline enterprise topology for UniversiaCorp...")
+            seed_enterprise_topology()
+    except Exception as e:
+        logger.error(f"Database initialization warning on startup: {e}")
 
     # Register API Endpoints
     app.register_blueprint(api_bp)

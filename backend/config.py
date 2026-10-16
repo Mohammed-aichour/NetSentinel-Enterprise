@@ -5,12 +5,33 @@ Enterprise Network Security & Telemetry Monitoring Platform
 """
 
 import os
+import tempfile
 from pathlib import Path
 
 # Base Paths
 BASE_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = BASE_DIR / "data"
-DATA_DIR.mkdir(exist_ok=True)
+
+# Detect serverless environment (Vercel, AWS Lambda) or read-only filesystem
+IS_SERVERLESS = bool(
+    os.getenv("VERCEL") or
+    os.getenv("AWS_LAMBDA_FUNCTION_NAME") or
+    os.getenv("LAMBDA_TASK_ROOT")
+)
+
+if IS_SERVERLESS:
+    DATA_DIR = Path(tempfile.gettempdir()) / "netsentinel_data"
+else:
+    DATA_DIR = BASE_DIR / "data"
+
+try:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+except OSError:
+    DATA_DIR = Path(tempfile.gettempdir()) / "netsentinel_data"
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
+
 # Database & Persistence Settings
 DATABASE_URL = os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL") or os.getenv("NETSENTINEL_DATABASE_URL")
 DB_PATH = os.getenv("NETSENTINEL_DB_PATH", str(DATA_DIR / "netsentinel.db"))
