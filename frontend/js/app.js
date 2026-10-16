@@ -107,17 +107,40 @@ class SocApplication {
       const res = await fetch("/api/v1/health");
       if (res.ok) {
         this.isLiveBackend = true;
-        document.getElementById("mode-badge").textContent = "API LIVE";
-        document.getElementById("mode-badge").classList.add("btn-primary");
+        const badge = document.getElementById("mode-badge");
+        if (badge) {
+          badge.textContent = "API LIVE";
+          badge.classList.remove("btn-secondary");
+          badge.classList.add("btn-primary");
+        }
+        const streamBadge = document.getElementById("badge-telemetry-mode");
+        if (streamBadge) streamBadge.textContent = "Live Python Engine Stream";
+      } else {
+        this.isLiveBackend = false;
+        const badge = document.getElementById("mode-badge");
+        if (badge) {
+          badge.textContent = "STATIC DEMO (SIMULATED)";
+          badge.classList.remove("btn-primary");
+          badge.classList.add("btn-secondary");
+        }
+        const streamBadge = document.getElementById("badge-telemetry-mode");
+        if (streamBadge) streamBadge.textContent = "Simulated SNMP Stream";
       }
     } catch {
       this.isLiveBackend = false;
-      document.getElementById("mode-badge").textContent = "STATIC DEMO";
-      document.getElementById("mode-badge").classList.add("btn-secondary");
+      const badge = document.getElementById("mode-badge");
+      if (badge) {
+        badge.textContent = "STATIC DEMO (SIMULATED)";
+        badge.classList.remove("btn-primary");
+        badge.classList.add("btn-secondary");
+      }
+      const streamBadge = document.getElementById("badge-telemetry-mode");
+      if (streamBadge) streamBadge.textContent = "Simulated SNMP Stream";
     }
 
     await this.refreshData();
   }
+
 
   async refreshData() {
     if (this.isLiveBackend) {
@@ -180,9 +203,11 @@ class SocApplication {
   }
 
   _loadFallbackData() {
-    this.topology = FALLBACK_ENTERPRISE_TOPOLOGY;
-    this.devices = FALLBACK_ENTERPRISE_TOPOLOGY.nodes;
-    this.topoViz.setData(this.topology.nodes, this.topology.links);
+    if (!this.topology || !this.devices || this.devices.length === 0) {
+      this.topology = FALLBACK_ENTERPRISE_TOPOLOGY;
+      this.devices = JSON.parse(JSON.stringify(FALLBACK_ENTERPRISE_TOPOLOGY.nodes));
+      this.topoViz.setData(this.devices, this.topology.links);
+    }
     
     // Seed initial alerts
     if (this.alerts.length === 0) {
@@ -205,8 +230,11 @@ class SocApplication {
     this.renderAlertsTable();
     this.renderDevicesTable();
     this.updateKpiCounters();
+    this._pollFallbackMetrics();
+  }
 
-    // Stream synthetic chart metrics
+  _pollFallbackMetrics() {
+    // Stream synthetic chart metrics in offline demo mode
     const simBw = Math.round(420 + Math.random() * 80);
     const simLat = parseFloat((1.8 + Math.random() * 0.8).toFixed(2));
     const simLoss = Math.random() > 0.85 ? 0.3 : 0.0;
@@ -219,7 +247,7 @@ class SocApplication {
     if (this.isLiveBackend) {
       await this.refreshData();
     } else {
-      this._loadFallbackData();
+      this._pollFallbackMetrics();
     }
   }
 
@@ -638,6 +666,9 @@ class SocApplication {
       this.renderAlertsTable();
       this.renderDevicesTable();
       this.updateKpiCounters();
+    }
+  }
+
   _bindUiEvents() {
     document.getElementById("btn-open-attack-modal")?.addEventListener("click", () => this.openAttackModal());
     document.getElementById("btn-close-attack-modal")?.addEventListener("click", () => this.closeAttackModal());
