@@ -55,9 +55,14 @@ class SocApplication {
     this.tierFilter = "";
     this.statusFilter = "";
 
-    // Configurable API endpoint
-    this.apiBase = typeof localStorage !== "undefined" ? (localStorage.getItem("netsentinel_api_base") || "") : "";
+    // Configurable API endpoint (auto-connect to live Vercel backend if hosted on GitHub Pages)
+    let defaultBase = "";
+    if (typeof window !== "undefined" && window.location && typeof window.location.hostname === "string" && window.location.hostname.includes("github.io")) {
+      defaultBase = "https://net-sentinel-enterprise.vercel.app";
+    }
+    this.apiBase = typeof localStorage !== "undefined" ? (localStorage.getItem("netsentinel_api_base") || defaultBase) : defaultBase;
     this.apiKey = typeof localStorage !== "undefined" ? (localStorage.getItem("netsentinel_api_key") || "") : "";
+    this.useDirectV1Prefix = false;
 
     // Charts
     this.bwChart = null;
@@ -79,7 +84,11 @@ class SocApplication {
 
   _apiUrl(endpoint) {
     const base = this.apiBase ? this.apiBase.replace(/\/+$/, "") : "";
-    return `${base}${endpoint}`;
+    let cleanEp = endpoint;
+    if (this.useDirectV1Prefix && cleanEp.startsWith("/api/v1")) {
+      cleanEp = cleanEp.substring(4);
+    }
+    return `${base}${cleanEp}`;
   }
 
   _getHeaders(extra = {}) {
@@ -131,13 +140,16 @@ class SocApplication {
 
   async checkBackendAndLoad() {
     try {
-      const [healthRes, readyRes] = await Promise.all([
-        fetch(this._apiUrl("/api/v1/health"), { headers: this._getHeaders() }),
-        fetch(this._apiUrl("/api/v1/ready"), { headers: this._getHeaders() }).catch(() => null)
-      ]);
+      let healthRes = await fetch(this._apiUrl("/api/v1/health"), { headers: this._getHeaders() }).catch(() => null);
+      if (!healthRes || !healthRes.ok) {
+        // Fall back to direct /v1 prefix if /api/v1 returned 404 (serverless routing adapter)
+        this.useDirectV1Prefix = true;
+        healthRes = await fetch(this._apiUrl("/api/v1/health"), { headers: this._getHeaders() }).catch(() => null);
+      }
 
-      if (healthRes.ok) {
+      if (healthRes && healthRes.ok) {
         this.isLiveBackend = true;
+        const readyRes = await fetch(this._apiUrl("/api/v1/ready"), { headers: this._getHeaders() }).catch(() => null);
         if (readyRes && readyRes.ok) {
           const readyData = await readyRes.json();
           this.databaseEngine = readyData.database_engine || "Relational DB";

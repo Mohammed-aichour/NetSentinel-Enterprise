@@ -60,7 +60,7 @@ class NetworkProbe:
             elapsed = (time.perf_counter() - start) * 1000.0
             stdout_text = res.stdout or ""
 
-            if res.returncode == 0:
+            if res.returncode == 0 and "ttl expired" not in stdout_text.lower() and "unreachable" not in stdout_text.lower():
                 # Try to extract real parsed RTT from ping stdout
                 rtt = round(elapsed / max(1, count), 2)
                 loss = 0.0
